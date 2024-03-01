@@ -1,0 +1,220 @@
+version: "3"
+
+env:
+  CDK8S_CHECK_UPGRADE: false
+
+tasks:
+  docs:watch:
+    desc: Build docs
+    dir: ./docs
+    cmd: pnpm dev
+
+  check:tools:
+    desc: Checks all required tools are installed
+    cmds:
+      - which ck8s
+      - which k3d
+
+  deps:
+    desc: Install required binaries & tools
+    cmds:
+      - task: deps:k3d
+      - task: deps:cdk8s
+
+  deps:k3d:
+    desc: Install k3d
+    cmd: brew install k3d
+    preconditions:
+      - if ! which k3d; then which k3d; fi
+
+  deps:cdk8s:
+    desc: Install cdk8s
+    cmd: if ! which cdk8s; then pnpm install -g cdk8s-cli; fi
+
+  dev:manifests:
+    desc: Build Kubernetes manifests
+    dir: 2-resources
+    cmd: time cdk8s synth
+
+  dev:gen-ca:
+    desc: Generate a CA cert, if one does not already exist
+    dir: pki
+    preconditions:
+      - sh: "[ ! -f ca.pem ]"
+        msg: A CA cert already exists
+    cmd: cfssl gencert -initca ca-csr.json | cfssljson -bare ca -
+
+  dev:export-crds:
+    desc: Export all CRDs from the cluster
+    dir: 2-resources/
+    shopt:
+      - globstar
+    vars:
+      CRD_DIR: __crds
+    cmds:
+      - cmd: mkdir -p {{.CRD_DIR}}
+        silent: true
+
+      # NB: Stops looping after first `kubectl` if not explicitly run via. bash
+      - cmd: |
+          bash -c '
+            crds=$(kubectl get crd -o custom-columns="NAME:.metadata.name" --no-headers)
+            while read -r crd; do
+              echo "Exporting ${crd}"
+              kubectl get crd "${crd}" -o yaml > "{{.CRD_DIR}}/${crd}.yaml"
+            done <<< "${crds}"
+          '
+        silent: true
+
+  dev:import-crds:
+    desc: Import all CRDs into cdk8s
+    dir: 2-resources/
+    vars:
+      CRD_DIR: __crds
+    cmds:
+      - task: dev:import-crds:cert-manager
+      - task: dev:import-crds:trust-manager
+      - task: dev:import-crds:istio
+
+  dev:import-crds:cert-manager:
+    desc: Import CRDs into cdk8s - cert-manager
+    dir: 2-resources/
+    vars:
+      CRD_DIR: __crds
+    cmd: |
+      # cert-manager
+      cdk8s import cert-manager/certificaterequests:={{.CRD_DIR}}/certificaterequests.cert-manager.io.yaml
+      cdk8s import cert-manager/certificates:={{.CRD_DIR}}/certificates.cert-manager.io.yaml
+      cdk8s import cert-manager/challenges:={{.CRD_DIR}}/challenges.acme.cert-manager.io.yaml
+      cdk8s import cert-manager/clusterissuers:={{.CRD_DIR}}/clusterissuers.cert-manager.io.yaml
+      cdk8s import cert-manager/issuers:={{.CRD_DIR}}/issuers.cert-manager.io.yaml
+      cdk8s import cert-manager/orders:={{.CRD_DIR}}/orders.acme.cert-manager.io.yaml
+
+  dev:import-crds:trust-manager:
+    desc: Import CRDs into cdk8s - trust-manager
+    dir: 2-resources/
+    vars:
+      CRD_DIR: __crds
+    cmd: |
+      cdk8s import trust-manager/bundles:={{.CRD_DIR}}/bundles.trust.cert-manager.io.yaml
+
+  dev:import-crds:istio:
+    desc: Import CRDs into cdk8s - istio
+    dir: 2-resources/
+    vars:
+      CRD_DIR: __crds
+    cmds:
+      - |
+        cdk8s import istio/security-authorizationpolicies:={{.CRD_DIR}}/authorizationpolicies.security.istio.io.yaml
+        cdk8s import istio/networking-destinationrules:={{.CRD_DIR}}/destinationrules.networking.istio.io.yaml
+        cdk8s import istio/networking-envoyfilters:={{.CRD_DIR}}/envoyfilters.networking.istio.io.yaml
+        cdk8s import istio/networking-gateways:={{.CRD_DIR}}/gateways.networking.istio.io.yaml
+        cdk8s import istio/install-istiooperators:={{.CRD_DIR}}/istiooperators.install.istio.io.yaml
+        cdk8s import istio/security-peerauthentications:={{.CRD_DIR}}/peerauthentications.security.istio.io.yaml
+        cdk8s import istio/networking-proxyconfigs:={{.CRD_DIR}}/proxyconfigs.networking.istio.io.yaml
+        cdk8s import istio/security-requestauthentications:={{.CRD_DIR}}/requestauthentications.security.istio.io.yaml
+        cdk8s import istio/networking-serviceentries:={{.CRD_DIR}}/serviceentries.networking.istio.io.yaml
+        cdk8s import istio/networking-sidecars:={{.CRD_DIR}}/sidecars.networking.istio.io.yaml
+        cdk8s import istio/telemetry-telemetries:={{.CRD_DIR}}/telemetries.telemetry.istio.io.yaml
+        cdk8s import istio/networking-virtualservices:={{.CRD_DIR}}/virtualservices.networking.istio.io.yaml
+        cdk8s import istio/extensions-wasmplugins:={{.CRD_DIR}}/wasmplugins.extensions.istio.io.yaml
+        cdk8s import istio/networking-workloadentries:={{.CRD_DIR}}/workloadentries.networking.istio.io.yaml
+        cdk8s import istio/networking-workloadgroups:={{.CRD_DIR}}/workloadgroups.networking.istio.io.yaml
+
+      - task: dev:import-crds:istio:apply-fixes
+
+  dev:import-crds:istio:apply-fixes:
+    desc: Fixes duplicate definitions
+    dir: 2-resources
+    cmds:
+      - silent: true
+        cmd: |
+          bash -c '
+            file="imports/istio/security-requestauthentications-security.istio.io.ts"
+            echo "Fixing ${file}"
+
+            lines=('189' '573')
+            for line in "${lines[@]}"; do
+                echo "Updating line ${line}"
+                gsed -i "${line}s#readonly jwksUri#readonly jwks_uri#" "${file}"
+            done
+          '
+
+      - silent: true
+        cmd: |
+          bash -c '
+            file="imports/istio/networking-virtualservices-networking.istio.io.ts"
+            echo "Fixing ${file}"
+
+            lines=('221' '2538')
+            for line in "${lines[@]}"; do
+                echo "Updating line ${line}"
+                gsed -i "${line}s#readonly mirrorPercent#readonly mirror_percent#" "${file}"
+              done
+          '
+
+  deploy:
+    desc: Deploy all core resources
+    cmds:
+      - task: deploy:core:00-sealed-secrets
+      - task: deploy:core:01-reflector
+      - task: deploy:core:02-cert-manager
+      - task: deploy:core:03-trust-manager
+      - task: deploy:core:04-cluster-certs
+      - task: deploy:core:05-istio
+
+  deploy:core:00-sealed-secrets:
+    desc: Deploy - Sealed Secrets
+    dir: 2-resources/dist
+    cmds:
+      - kubectl apply -f 0000-cluster-core-sealed-secrets.k8s.yaml
+
+  deploy:core:01-reflector:
+    desc: Deploy - Reflector
+    dir: 2-resources/dist
+    cmds:
+      - kubectl apply -f 0001-cluster-core-reflector.k8s.yaml
+
+  deploy:core:02-cert-manager:
+    desc: Deploy - Cert manager
+    dir: 2-resources/dist
+    cmds:
+      - kubectl apply -f 0002-cluster-core-cert-manager.k8s.yaml
+
+  deploy:core:03-trust-manager:
+    desc: Deploy - Trust manager
+    dir: 2-resources/dist
+    cmds:
+      - kubectl apply -f 0003-cluster-core-trust-manager.k8s.yaml
+
+  deploy:core:04-cluster-certs:
+    desc: Deploy - Cluster certs
+    dir: 2-resources/dist
+    cmds:
+      - kubectl apply -f 0004-cluster-core-cluster-certs.k8s.yaml
+
+  deploy:core:05-istio:
+    desc: Deploy - Istio
+    dir: 2-resources/dist
+    cmds:
+      - kubectl apply -f 0005-cluster-core-istio.k8s.yaml
+      - |
+        kubectl -n cluster-core-istio wait \
+          pod \
+          -l app=istiod \
+          --for=condition=ready \
+          --timeout=300s
+
+  deploy:core:06-istio-gateway:
+    desc: Deploy - Istio gateway
+    dir: 2-resources/dist
+    cmds:
+      - kubectl apply -f 0006-cluster-core-istio-gateway.k8s.yaml
+
+  dev:busybox:
+    desc: Spin up a busybox Pod in provided namespace
+    interactive: true
+    cmds:
+      - kubectl -n {{.CLI_ARGS | default "default"}} run busybox --image=busybox --command -- sleep infinity || true
+      - kubectl -n {{.CLI_ARGS | default "default"}} wait --for=condition=ready pod/busybox --timeout=30s
+      - kubectl -n {{.CLI_ARGS | default "default"}} exec busybox -it -- sh
