@@ -25,6 +25,7 @@ export class SealedSecretsChart extends Chart {
     this.helmChart = new Sealedsecrets(this, `${SERVICE}-chart`, {
       namespace: props.namespace,
       releaseName: "sealed-secrets",
+      helmFlags: ["--include-crds"],
       values: {},
     });
 

@@ -32,7 +32,7 @@ options:
     wait: true
     timeout: 1m
     disableLoadbalancer: false
-    disableImageVolume: false 
+    disableImageVolume: false
     disableRollback: false
     loadbalancer:
       configOverrides:
@@ -40,7 +40,7 @@ options:
 
   k3s:
     extraArgs:
-      - arg: --tls-san=k8s-lab.local
+      - arg: --tls-san=dev-cluster.local
         nodeFilters:
           - server:*
 
@@ -49,7 +49,7 @@ options:
           - server:*
 
     nodeLabels:
-      - label: role=server 
+      - label: role=server
         nodeFilters:
           - server:*
 

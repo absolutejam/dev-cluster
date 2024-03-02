@@ -58,7 +58,7 @@ export class IstioGatewayChart extends Chart {
         namespace: props.namespace,
       },
       spec: {
-        secretName: tls.commonName,
+        secretName: tls.certSecretName,
         dnsNames: tls.hostnames,
         commonName: tls.commonName,
         issuerRef: {

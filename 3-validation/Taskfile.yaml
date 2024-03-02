@@ -1,0 +1,7 @@
+version: "3"
+
+tasks:
+  pki:
+    desc: Validates PKI
+    cmds:
+      - conftest test -n validate_pki --data ../config.yaml - <<<$(kubectl get certs -A -o yaml)

@@ -5,8 +5,8 @@ import {
   Certificate,
   CertificateSpecPrivateKeyAlgorithm,
 } from "@/imports/cert-manager/certificates-cert-manager.io";
-import { Issuer } from "@/imports/cert-manager/issuers-cert-manager.io";
 import { Bundle } from "@/imports/trust-manager/bundles-trust.cert-manager.io";
+import { ClusterIssuer } from "@/imports/cert-manager/clusterissuers-cert-manager.io";
 
 export type TrustManagerChartProps = {
   caCert: string;
@@ -22,7 +22,7 @@ export type TrustManagerChartProps = {
 
 export class ClusterCertsChart extends Chart {
   public secret: KubeSecret;
-  public rootIssuer: Issuer;
+  public rootIssuer: ClusterIssuer;
   public caCert: Certificate;
   public bundle: Bundle;
 
@@ -49,12 +49,12 @@ export class ClusterCertsChart extends Chart {
         namespace: certManagerNamespace,
       },
       data: {
-        ["tls.crt"]: Buffer.from(caCert, "utf-8").toString("base64"),
-        ["tls.key"]: Buffer.from(caCertKey, "utf-8").toString("base64"),
+        "tls.crt": Buffer.from(caCert, "utf-8").toString("base64"),
+        "tls.key": Buffer.from(caCertKey, "utf-8").toString("base64"),
       },
     });
 
-    this.rootIssuer = new Issuer(this, `${SERVICE}-issuer`, {
+    this.rootIssuer = new ClusterIssuer(this, `${SERVICE}-issuer`, {
       metadata: {
         name: rootCaName,
         namespace: certManagerNamespace,
@@ -91,7 +91,7 @@ export class ClusterCertsChart extends Chart {
           size: 256,
         },
         issuerRef: {
-          kind: "Issuer",
+          kind: "ClusterIssuer",
           name: rootCaName,
           group: "cert-manager.io",
         },

@@ -1,16 +1,29 @@
+import * as fs from "fs";
 import { App } from "cdk8s";
+import { loadYamlConfig } from "@/config";
 import { SealedSecretsChart } from "@/resources/core/01-sealed-secrets";
 import { ReflectorChart } from "./resources/core/02-reflector";
 import { CertManagerChart } from "./resources/core/03-cert-manager";
 import { TrustManagerChart } from "./resources/core/04-trust-manager";
 import { ClusterCertsChart } from "./resources/core/05-cluster-certs";
-import * as fs from "fs";
 import { IstioChart } from "./resources/core/06-istio";
 import { IstioGatewayChart } from "./resources/core/07-istio-gateway";
+import { GiteaChart } from "./resources/core/08-gitea";
+
+//------------------------------------------------------------------------------
+
+const config = loadYamlConfig("../config.yaml");
+const {
+  vars: { core: CORE, domain: DOMAIN },
+  pki: { rootCaName, rootCertName, selfSignedCaName, selfSignedBundleName },
+  gitea: giteaConfig,
+} = config;
+
+console.log(config.pki);
+
+//------------------------------------------------------------------------------
 
 const app = new App();
-
-const CORE = "cluster-core";
 
 const sealedSecrets = new SealedSecretsChart(app, `${CORE}-sealed-secrets`, {
   createNamespace: true,
@@ -46,10 +59,10 @@ const clusterCerts = new ClusterCertsChart(app, `${CORE}-cluster-certs`, {
   caCert: fs.readFileSync("../pki/ca.pem", { encoding: "utf-8" }),
   caCertKey: fs.readFileSync("../pki/ca-key.pem", { encoding: "utf-8" }),
 
-  rootCaName: "root-ca",
-  rootCertName: "root-cert",
-  selfSignedCaName: "ca",
-  selfSignedBundleName: "bundle",
+  rootCaName,
+  rootCertName,
+  selfSignedCaName,
+  selfSignedBundleName,
 });
 clusterCerts.addDependency(trustManager);
 
@@ -58,20 +71,36 @@ const istio = new IstioChart(app, `${CORE}-istio`, {
   namespace: `${CORE}-istio`,
 });
 
-// NOTE: No dependency on cluster certs as it was killing synth
-//       performance 😕
+// NOTE: No dependency on cluster certs as it was killing synth performance 😕
 
 const istioGateway = new IstioGatewayChart(app, `${CORE}-istio-gateway`, {
   namespace: `${CORE}-istio`,
   tls: {
-    issuerKind: "ClusterIssuer",
-    issuerName: "root-ca",
-    commonName: "devcluster.local",
-    certSecretName: "istio-gateway-devcluster-local-cert",
-    hostnames: ["devcluster-lab.local"],
+    issuerKind: clusterCerts.rootIssuer.kind,
+    issuerName: clusterCerts.rootIssuer.metadata.name!,
+    commonName: DOMAIN,
+    certSecretName: "istio-gateway-dev-cluster-local-cert",
+    hostnames: [DOMAIN],
   },
 });
 istioGateway.addDependency(istio);
+
+const gitea = new GiteaChart(app, `${CORE}-gitea`, {
+  namespace: `${CORE}-gitea`,
+  createNamespace: true,
+
+  domain: DOMAIN,
+  adminCredentials: {
+    username: giteaConfig.username,
+    password: giteaConfig.password,
+    email: giteaConfig.email,
+  },
+  postgresConfig: {
+    password: "waffle123!",
+    postgresPassword: "waffle123!",
+  },
+});
+gitea.addDependency(istioGateway);
 
 console.time();
 app.synth();

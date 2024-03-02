@@ -1,0 +1,15 @@
+vars:
+  core: cluster-core
+  domain: dev-cluster.local
+
+pki:
+  rootCaName: root-ca
+  rootCertName: root-cert
+  selfSignedCaName: ca
+  selfSignedBundleName: bundle
+
+gitea:
+  # NOTE: `admin` is reserved
+  username: gitea-admin
+  password: admin
+  email: admin@dev-cluster.local

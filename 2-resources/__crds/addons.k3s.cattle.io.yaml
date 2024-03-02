@@ -7,13 +7,13 @@ metadata:
     objectset.rio.cattle.io/owner-gvk: apiextensions.k8s.io/v1, Kind=CustomResourceDefinition
     objectset.rio.cattle.io/owner-name: addons.k3s.cattle.io
     objectset.rio.cattle.io/owner-namespace: ""
-  creationTimestamp: "2024-02-29T11:11:11Z"
+  creationTimestamp: "2024-03-02T07:04:42Z"
   generation: 1
   labels:
     objectset.rio.cattle.io/hash: 76092cd54ba63fc73cd7b8728426e6e5e7033ede
   name: addons.k3s.cattle.io
-  resourceVersion: "213"
-  uid: 8a99aa71-5768-4b4b-9287-474a1905f739
+  resourceVersion: "212"
+  uid: 4e513d13-0247-4103-9f77-a2cbbc928a04
 spec:
   conversion:
     strategy: None
@@ -43,12 +43,12 @@ status:
     plural: addons
     singular: addon
   conditions:
-  - lastTransitionTime: "2024-02-29T11:11:11Z"
+  - lastTransitionTime: "2024-03-02T07:04:42Z"
     message: no conflicts found
     reason: NoConflicts
     status: "True"
     type: NamesAccepted
-  - lastTransitionTime: "2024-02-29T11:11:11Z"
+  - lastTransitionTime: "2024-03-02T07:04:42Z"
     message: the initial names have been accepted
     reason: InitialNamesAccepted
     status: "True"
