@@ -5,6 +5,7 @@ import { z } from "zod";
 export const config = z.object({
   vars: z.object({
     core: z.string(),
+    ext: z.string(),
     domain: z.string(),
   }),
   pki: z.object({

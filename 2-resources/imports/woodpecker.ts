@@ -2,7 +2,7 @@
 import { Helm, HelmProps } from 'cdk8s';
 import { Construct } from 'constructs';
 
-export interface BaseProps {
+export interface WoodpeckerProps {
   readonly namespace?: string;
   readonly releaseName?: string;
   readonly helmExecutable?: string;
@@ -10,8 +10,8 @@ export interface BaseProps {
   readonly values?: { [key: string]: any };
 }
 
-export class Base extends Construct {
-  public constructor(scope: Construct, id: string, props: BaseProps = {}) {
+export class Woodpecker extends Construct {
+  public constructor(scope: Construct, id: string, props: WoodpeckerProps = {}) {
     super(scope, id);
     let updatedProps = {};
 
@@ -27,9 +27,9 @@ export class Base extends Construct {
     }
 
     const finalProps: HelmProps = {
-      chart: 'base',
-      repo: 'https://istio-release.storage.googleapis.com/charts',
-      version: '1.20.3',
+      chart: 'woodpecker',
+      repo: 'https://woodpecker-ci.org',
+      version: '1.1.1',
       ...(Object.keys(updatedProps).length !== 0 ? updatedProps : props),
     };
 

@@ -8,7 +8,7 @@ import {
 import { Bundle } from "@/imports/trust-manager/bundles-trust.cert-manager.io";
 import { ClusterIssuer } from "@/imports/cert-manager/clusterissuers-cert-manager.io";
 
-export type TrustManagerChartProps = {
+export type ClusterCertsChartProps = {
   caCert: string;
   caCertKey: string;
   rootCaName: string;
@@ -26,7 +26,7 @@ export class ClusterCertsChart extends Chart {
   public caCert: Certificate;
   public bundle: Bundle;
 
-  constructor(scope: Construct, id: string, props: TrustManagerChartProps) {
+  constructor(scope: Construct, id: string, props: ClusterCertsChartProps) {
     const {
       caCert,
       caCertKey,

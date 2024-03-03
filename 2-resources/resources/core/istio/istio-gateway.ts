@@ -10,6 +10,7 @@ import { Construct } from "constructs";
 import { CoreResourcesProps } from "../shared";
 
 export type IstioGatewayChartProps = {
+  gatewayName: string;
   tls: {
     commonName: string;
     issuerKind: string;
@@ -23,7 +24,9 @@ export type IstioGatewayChartProps = {
 export class IstioGatewayChart extends Chart {
   public helmChart: IstioGatewayHelmChart;
   public cert: Certificate;
-  public gateway: IstioGateway;
+  public istioGateway: IstioGateway;
+
+  public gateway: string;
 
   constructor(scope: Construct, id: string, props: IstioGatewayChartProps) {
     const { tls } = props;
@@ -31,6 +34,8 @@ export class IstioGatewayChart extends Chart {
     super(scope, id);
 
     const SERVICE = "istio-gateway";
+
+    this.gateway = `${props.namespace}/${props.gatewayName}`;
 
     var namespace: KubeNamespace | undefined = undefined;
 
@@ -69,9 +74,9 @@ export class IstioGatewayChart extends Chart {
       },
     });
 
-    this.gateway = new IstioGateway(this, `${SERVICE}-gateway`, {
+    this.istioGateway = new IstioGateway(this, `${SERVICE}-gateway`, {
       metadata: {
-        name: "istio-gateway",
+        name: props.gatewayName,
         namespace: props.namespace,
       },
       spec: {

@@ -9,6 +9,9 @@ imports:
   - helm:https://istio-release.storage.googleapis.com/charts/istiod@1.20.3
   - helm:https://istio-release.storage.googleapis.com/charts/base@1.20.3
   - helm:https://istio-release.storage.googleapis.com/charts/gateway@1.20.3
+  - helm:https://dl.gitea.com/charts/gitea@10.1.3
+  - helm:https://woodpecker-ci.org/woodpecker@1.1.1
+  - helm:https://charts.crossplane.io/stable/crossplane@1.15.0
   - cert-manager/challenges:=__crds/challenges.acme.cert-manager.io.yaml
   - cert-manager/certificaterequests:=__crds/certificaterequests.cert-manager.io.yaml
   - cert-manager/certificates:=__crds/certificates.cert-manager.io.yaml
@@ -31,5 +34,4 @@ imports:
   - istio/extensions-wasmplugins:=__crds/wasmplugins.extensions.istio.io.yaml
   - istio/networking-workloadentries:=__crds/workloadentries.networking.istio.io.yaml
   - istio/networking-workloadgroups:=__crds/workloadgroups.networking.istio.io.yaml
-  - helm:https://dl.gitea.com/charts/gitea@10.1.3
   - sealed-secrets/sealedsecrets:=__crds/sealedsecrets.bitnami.com.yaml

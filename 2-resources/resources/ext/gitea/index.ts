@@ -3,10 +3,11 @@ import { VirtualService } from "@/imports/istio/networking-virtualservices-netwo
 import { KubeNamespace, KubeSecret } from "@/imports/k8s";
 import { Chart, ChartProps } from "cdk8s";
 import { Construct } from "constructs";
-import { CoreResourcesProps } from "../shared";
+import { CoreResourcesProps, base64 } from "@/resources/shared";
 
 export type GiteaChartProps = {
   domain: string;
+  istioGateway: string;
   adminCredentials: {
     username: string;
     password: string;
@@ -23,13 +24,16 @@ export class GiteaChart extends Chart {
   public helmChart: Gitea;
   public adminSecret: KubeSecret;
   public virtualService: VirtualService;
+  public url: string;
 
   constructor(scope: Construct, id: string, props: GiteaChartProps) {
-    const { domain, adminCredentials, postgresConfig } = props;
+    const { domain, adminCredentials, postgresConfig, istioGateway } = props;
 
     super(scope, id);
 
     const SERVICE = "gitea";
+
+    this.url = `https://gitea-http.${props.namespace}.svc.cluster.local:3000`;
 
     var namespace: KubeNamespace | undefined = undefined;
 
@@ -54,13 +58,9 @@ export class GiteaChart extends Chart {
         },
       },
       data: {
-        username: Buffer.from(adminCredentials.username, "utf-8").toString(
-          "base64",
-        ),
-        password: Buffer.from(adminCredentials.password, "utf-8").toString(
-          "base64",
-        ),
-        email: Buffer.from(adminCredentials.email, "utf-8").toString("base64"),
+        username: base64(adminCredentials.username),
+        password: base64(adminCredentials.password),
+        email: base64(adminCredentials.email),
       },
     });
 
@@ -118,7 +118,7 @@ export class GiteaChart extends Chart {
         },
         spec: {
           hosts: ["*"],
-          gateways: ["cluster-core-istio/istio-gateway"], // TODO: Props
+          gateways: [istioGateway],
           http: [
             {
               name: "http",
@@ -154,6 +154,7 @@ export class GiteaChart extends Chart {
     if (namespace !== undefined) {
       this.adminSecret.node.addDependency(namespace);
       this.helmChart.node.addDependency(namespace);
+      this.virtualService.node.addDependency(namespace);
     }
   }
 }

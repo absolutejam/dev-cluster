@@ -44,12 +44,9 @@ tasks:
     desc: Install cdk8s
     cmd: if ! which cdk8s; then pnpm install -g cdk8s-cli; fi
 
-  dev:manifests:
-    desc: Build Kubernetes manifests
-    dir: 2-resources
-    # don't use `cdk8s synth` but instead run the command directly
-    # so that console.log is not masked
-    cmd: time npx ts-node -r tsconfig-paths/register main.ts
+  #-------------------------------------------------------------------------------
+  # Bootstrap
+  #-------------------------------------------------------------------------------
 
   dev:gen-ca:
     desc: Generate a CA cert, if one does not already exist
@@ -189,45 +186,51 @@ tasks:
               done
           '
 
-  deploy:
-    desc: Deploy all resources
-    cmds:
-      - task: deploy:core
-
-  deploy:core:
-    desc: Deploy all core resources
-    cmds:
-      - task: deploy:core:01-sealed-secrets
-      - task: deploy:core:02-reflector
-      - task: deploy:core:03-cert-manager
-      - task: deploy:core:04-trust-manager
-      - task: deploy:core:05-cluster-certs
-      - task: deploy:core:06-istio
-      - task: deploy:core:07-istio-gateway
-      - task: deploy:core:08-gitea
-
   deploy:cluster:
     desc: Spin up the K3d cluster
     dir: 1-cluster
     cmd: k3d cluster create --config k3d.yaml
 
-  deploy:core:01-sealed-secrets:
-    desc: Deploy - Sealed Secrets
-    dir: 2-resources/dist
-    cmds:
-      - kubectl apply -f 0000-cluster-core-sealed-secrets.k8s.yaml
+  manifests:01-core:
+    desc: Build Kubernetes manifests - 01-core
+    dir: 2-resources
+    cmd: time npx ts-node -r tsconfig-paths/register 01-core.ts
 
-  deploy:core:02-reflector:
-    desc: Deploy - Reflector
-    dir: 2-resources/dist
-    cmds:
-      - kubectl apply -f 0001-cluster-core-reflector.k8s.yaml
+  manifests:02-bootstrap-woodpecker:
+    desc: Build Kubernetes manifests - 02-bootstrap-woodpecker
+    dir: 2-resources
+    cmd: time npx ts-node -r tsconfig-paths/register 02-bootstrap-woodpecker.ts
 
-  deploy:core:03-cert-manager:
-    desc: Deploy - Cert manager
+  deploy:
+    desc: Deploy all resources
+    cmds:
+      - task: deploy:core
+      - task: deploy:ext
+
+  deploy:core:
+    desc: Deploy all core resources
+    cmds:
+      - task: deploy:core:01-secrets
+      - task: deploy:core:02-certs
+      - task: deploy:core:03-istio
+
+  deploy:ext:
+    desc: Deploy all external resources
+    cmds:
+      - task: deploy:core:gitea
+
+  deploy:core:01-secrets:
+    desc: Deploy - Secrets
     dir: 2-resources/dist
     cmds:
-      - kubectl apply -f 0002-cluster-core-cert-manager.k8s.yaml
+      - kubectl apply -f cluster-core-sealed-secrets.k8s.yaml
+      - kubectl apply -f cluster-core-reflector.k8s.yaml
+
+  deploy:core:02-certs:
+    desc: Deploy - Certs
+    dir: 2-resources/dist
+    cmds:
+      - kubectl apply -f cluster-core-cert-manager.k8s.yaml
       - |
         kubectl -n cluster-core-cert-manager wait \
           pod \
@@ -235,11 +238,7 @@ tasks:
           --for=condition=ready \
           --timeout=120s
 
-  deploy:core:04-trust-manager:
-    desc: Deploy - Trust manager
-    dir: 2-resources/dist
-    cmds:
-      - kubectl apply -f 0003-cluster-core-trust-manager.k8s.yaml
+      - kubectl apply -f cluster-core-trust-manager.k8s.yaml
       - |
         kubectl -n cluster-core-trust-manager wait \
           pod \
@@ -247,17 +246,13 @@ tasks:
           --for=condition=ready \
           --timeout=120s
 
-  deploy:core:05-cluster-certs:
-    desc: Deploy - Cluster certs
-    dir: 2-resources/dist
-    cmds:
-      - kubectl apply -f 0004-cluster-core-cluster-certs.k8s.yaml
+      - kubectl apply -f cluster-core-cluster-certs.k8s.yaml
 
-  deploy:core:06-istio:
+  deploy:core:03-istio:
     desc: Deploy - Istio
     dir: 2-resources/dist
     cmds:
-      - kubectl apply -f 0005-cluster-core-istio.k8s.yaml
+      - kubectl apply -f cluster-core-istio.k8s.yaml
       - |
         kubectl -n cluster-core-istio wait \
           pod \
@@ -265,11 +260,7 @@ tasks:
           --for=condition=ready \
           --timeout=300s
 
-  deploy:core:07-istio-gateway:
-    desc: Deploy - Istio gateway
-    dir: 2-resources/dist
-    cmds:
-      - kubectl apply -f 0006-cluster-core-istio-gateway.k8s.yaml
+      - kubectl apply -f cluster-core-istio-gateway.k8s.yaml
       - |
         kubectl -n cluster-core-istio wait \
           pod \
@@ -277,19 +268,19 @@ tasks:
           --for=condition=ready \
           --timeout=300s
 
-  deploy:core:08-gitea:
+  deploy:ext:gitea:
     desc: Deploy - Gitea
     dir: 2-resources/dist
     # NOTE: Gitea chart currently doesn't specify namespace, so we have
     #       to do it when applying
     cmds:
-      - kubectl apply --namespace cluster-core-gitea -f 0007-cluster-core-gitea.k8s.yaml
-      # - |
-      #   kubectl -n cluster-core-gitea wait \
-      #     pod \
-      #     -l app=gitea \
-      #     --for=condition=ready \
-      #     --timeout=300s
+      - kubectl apply --namespace ext-gitea -f ext-gitea.k8s.yaml
+      - |
+        kubectl -n ext-gitea wait \
+          pod \
+          -l app=gitea \
+          --for=condition=ready \
+          --timeout=300s
 
   dev:busybox:
     desc: Spin up a busybox Pod in provided namespace
@@ -298,3 +289,20 @@ tasks:
       - kubectl -n {{.CLI_ARGS | default "default"}} run busybox --image=busybox --command -- sleep infinity || true
       - kubectl -n {{.CLI_ARGS | default "default"}} wait --for=condition=ready pod/busybox --timeout=30s
       - kubectl -n {{.CLI_ARGS | default "default"}} exec busybox -it -- sh
+
+  dev:add-helm-repos:
+    desc: Adds all Helm repos
+    cmds:
+      - helm repo add istio https://istio-release.storage.googleapis.com/charts
+      - helm repo add traefik https://traefik.github.io/charts
+      - helm repo add gitea-charts https://dl.gitea.com/charts
+      - helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+      - helm repo add woodpecker https://woodpecker-ci.org
+      - helm repo add crossplane-stable https://charts.crossplane.io/stable
+      - helm repo update
+      - helm repo ls
+
+  dev:watch-manifests:
+    desc: Watches manifests (cdk8s) and automatically rebulds
+    dir: 2-resources
+    cmd: pnpm tsc --build -w

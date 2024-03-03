@@ -276,22 +276,22 @@ export interface GatewayPodAnnotations {
   /**
    * @schema GatewayPodAnnotations#inject.istio.io/templates
    */
-  readonly "injectIstioIo/templates?": string;
+  readonly "injectIstioIo/templates"?: string;
 
   /**
    * @schema GatewayPodAnnotations#prometheus.io/path
    */
-  readonly "prometheusIo/path?": string;
+  readonly "prometheusIo/path"?: string;
 
   /**
    * @schema GatewayPodAnnotations#prometheus.io/port
    */
-  readonly "prometheusIo/port?": string;
+  readonly "prometheusIo/port"?: string;
 
   /**
    * @schema GatewayPodAnnotations#prometheus.io/scrape
    */
-  readonly "prometheusIo/scrape?": string;
+  readonly "prometheusIo/scrape"?: string;
 
   /**
    * Values that are not available in values.schema.json will not be code generated. You can add such values to this property.
