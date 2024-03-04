@@ -2,6 +2,8 @@ version: "3"
 
 env:
   CDK8S_CHECK_UPGRADE: false
+  K3D_CLUSTER: lab
+  KUBECONFIG: ./1-cluster/kubeconfig.yaml
 
 includes:
   validation:
@@ -12,44 +14,91 @@ includes:
     dir: ./2-resources/
     taskfile: ./2-resources/Taskfile.yaml
 
-tasks:
-  docs:watch:
-    desc: Build docs
-    dir: ./docs
-    cmd: pnpm dev
+  docs:
+    dir: ./docs/
+    taskfile: ./docs/Taskfile.yaml
 
-  check:tools:
+tasks:
+  #-------------------------------------------------------------------------------
+  # High level
+  #-------------------------------------------------------------------------------
+
+  bootstrap:
+    desc: 🚀 Bootstraps the cluster core
+    cmds:
+      - task: deps:check
+      - task: dev:gen-ca
+      - task: cluster:up
+
+      # Core
+      - task: manifests:build:01-core
+      - task: manifests:deploy:core
+      - task: validation:pki
+
+      # Woodpecker
+      - task: dev:gen-woodpecker-gitea-token
+      - task: dev:gen-npm-token
+      - task: manifests:build:02-woodpecker
+      # - task: manifests:deploy:woodpecker
+
+  #-------------------------------------------------------------------------------
+  # Cluster
+  #-------------------------------------------------------------------------------
+
+  cluster:up:
+    desc: Spin up the K3d cluster
+    cmds:
+      - silent: true
+        cmd: |
+          cluster_output=$(k3d cluster ls --no-headers | grep "{{ .K3D_CLUSTER }}")
+
+          if [ -n "${cluster_output}" ]; then
+            cat <<EOF
+          Cluster already exists.
+
+          Run the following to remove it:
+
+              k3d cluster rm {{ .K3D_CLUSTER }}
+
+          EOF
+          else
+            k3d cluster create --config 1-cluster/k3d.yaml
+          fi
+
+          k3d kubeconfig get lab > 1-cluster/kubeconfig.yaml
+
+  #-------------------------------------------------------------------------------
+  # Dependencies
+  #-------------------------------------------------------------------------------
+
+  deps:check:
     desc: Checks all required tools are installed
     cmds:
       - which ck8s
       - which k3d
 
-  deps:
+  deps:install:
     desc: Install required binaries & tools
     cmds:
-      - task: deps:k3d
-      - task: deps:cdk8s
-      - task: deps:kubeseal
-      - task: deps:istioctl
+      - task: deps:install:k3d
+      - task: deps:install:cdk8s
+      - task: deps:install:kubeseal
+      - task: deps:install:istioctl
 
-  deps:kubeseal:
-    desc: Install kubeseal
+  deps:install:kubeseal:
     cmd: if ! which kubeseal; then brew install kubeseal; fi
 
-  deps:istioctl:
-    desc: Install istioctl
+  deps:install:istioctl:
     cmd: if ! which istioctl; then brew install istiocl; fi
 
-  deps:k3d:
-    desc: Install k3d
+  deps:install:k3d:
     cmd: if ! which k3d; then brew install k3d; fi
 
-  deps:cdk8s:
-    desc: Install cdk8s
+  deps:install:cdk8s:
     cmd: if ! which cdk8s; then pnpm install -g cdk8s-cli; fi
 
   #-------------------------------------------------------------------------------
-  # Bootstrap
+  # Dev tasks
   #-------------------------------------------------------------------------------
 
   dev:bootstrap-gitea-tokens:
@@ -228,11 +277,6 @@ tasks:
               done
           '
 
-  deploy:cluster:
-    desc: Spin up the K3d cluster
-    dir: 1-cluster
-    cmd: k3d cluster create --config k3d.yaml
-
   dev:busybox:
     desc: Spin up a busybox Pod in provided namespace
     interactive: true
@@ -252,86 +296,3 @@ tasks:
       - helm repo add crossplane-stable https://charts.crossplane.io/stable
       - helm repo update
       - helm repo ls
-
-  #-------------------------------------------------------------------------------
-
-  deploy:
-    desc: Deploy all resources
-    cmds:
-      - task: deploy:core
-      - task: deploy:ext
-
-  deploy:core:
-    desc: Deploy all core resources
-    cmds:
-      - task: deploy:core:01-secrets
-      - task: deploy:core:02-certs
-      - task: deploy:core:03-istio
-
-  deploy:ext:
-    desc: Deploy all external resources
-    cmds:
-      - task: deploy:core:gitea
-
-  deploy:core:01-secrets:
-    desc: Deploy - Secrets
-    dir: 2-resources/dist
-    cmds:
-      - kubectl apply -f cluster-core-sealed-secrets.k8s.yaml
-      - kubectl apply -f cluster-core-reflector.k8s.yaml
-
-  deploy:core:02-certs:
-    desc: Deploy - Certs
-    dir: 2-resources/dist
-    cmds:
-      - kubectl apply -f cluster-core-cert-manager.k8s.yaml
-      - |
-        kubectl -n cluster-core-cert-manager wait \
-          pod \
-          -l app.kubernetes.io/component=webhook \
-          --for=condition=ready \
-          --timeout=120s
-
-      - kubectl apply -f cluster-core-trust-manager.k8s.yaml
-      - |
-        kubectl -n cluster-core-trust-manager wait \
-          pod \
-          -l app=trust-manager \
-          --for=condition=ready \
-          --timeout=120s
-
-      - kubectl apply -f cluster-core-cluster-certs.k8s.yaml
-
-  deploy:core:03-istio:
-    desc: Deploy - Istio
-    dir: 2-resources/dist
-    cmds:
-      - kubectl apply -f cluster-core-istio.k8s.yaml
-      - |
-        kubectl -n cluster-core-istio wait \
-          pod \
-          -l app=istiod \
-          --for=condition=ready \
-          --timeout=300s
-
-      - kubectl apply -f cluster-core-istio-gateway.k8s.yaml
-      - |
-        kubectl -n cluster-core-istio wait \
-          pod \
-          -l app=istio-gateway \
-          --for=condition=ready \
-          --timeout=300s
-
-  deploy:ext:gitea:
-    desc: Deploy - Gitea
-    dir: 2-resources/dist
-    # NOTE: Gitea chart currently doesn't specify namespace, so we have
-    #       to do it when applying
-    cmds:
-      - kubectl apply --namespace ext-gitea -f ext-gitea.k8s.yaml
-      - |
-        kubectl -n ext-gitea wait \
-          pod \
-          -l app=gitea \
-          --for=condition=ready \
-          --timeout=300s

@@ -6,3 +6,4 @@ dist/
 2-resources/.npmrc
 secrets/**
 !secrets/.gitkeep
+1-cluster/kubeconfig.yaml

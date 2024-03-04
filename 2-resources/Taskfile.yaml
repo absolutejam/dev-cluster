@@ -1,23 +1,21 @@
 version: "3"
 
 tasks:
+  #-------------------------------------------------------------------------------
+  # Utils
+  #-------------------------------------------------------------------------------
+
   run-watcher:
     desc: Watches cdk8s definitions and transpiles
     cmd: pnpm tsc --build -w
 
-  build:stack:01-core:
+  #-------------------------------------------------------------------------------
+  # Core
+  #-------------------------------------------------------------------------------
+
+  build:01-core:
     desc: Build Kubernetes manifests - 01-core
     cmd: time npx ts-node -r tsconfig-paths/register src/stacks/01-core.ts
-
-  build:stack:02-woodpecker:
-    desc: Build Kubernetes manifests - 02-woodpecker
-    cmd: time npx ts-node -r tsconfig-paths/register src/stacks/02-woodpecker.ts
-
-  deploy:
-    desc: Deploy all resources
-    cmds:
-      - task: deploy:core
-      - task: deploy:ext
 
   deploy:core:
     desc: Deploy all core resources
@@ -25,11 +23,7 @@ tasks:
       - task: deploy:core:01-secrets
       - task: deploy:core:02-certs
       - task: deploy:core:03-istio
-
-  deploy:ext:
-    desc: Deploy all external resources
-    cmds:
-      - task: deploy:core:gitea
+      - task: deploy:core:04-gitea
 
   deploy:core:01-secrets:
     desc: Deploy - Secrets
@@ -80,7 +74,7 @@ tasks:
           --for=condition=ready \
           --timeout=300s
 
-  deploy:ext:gitea:
+  deploy:core:04-gitea:
     desc: Deploy - Gitea
     dir: dist
     # NOTE: Gitea chart currently doesn't specify namespace, so we have
@@ -93,3 +87,17 @@ tasks:
           -l app=gitea \
           --for=condition=ready \
           --timeout=300s
+
+  #-------------------------------------------------------------------------------
+  # Woodpecker
+  #-------------------------------------------------------------------------------
+
+  build:02-woodpecker:
+    desc: Build Kubernetes manifests - 02-woodpecker
+    cmd: time npx ts-node -r tsconfig-paths/register src/stacks/02-woodpecker.ts
+
+  deploy:woodpecker:
+    desc: Deploy woodpecker resources
+    dir: dist
+    cmds:
+      - kubectl apply -f ext-woodpecker.k8s.yaml
