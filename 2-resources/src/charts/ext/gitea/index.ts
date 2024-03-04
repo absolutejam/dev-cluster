@@ -3,7 +3,7 @@ import { VirtualService } from "@/imports/istio/networking-virtualservices-netwo
 import { KubeNamespace, KubeSecret } from "@/imports/k8s";
 import { Chart, ChartProps } from "cdk8s";
 import { Construct } from "constructs";
-import { CoreResourcesProps, base64 } from "@/resources/shared";
+import { CoreResourcesProps, base64 } from "@/utils";
 
 export type GiteaChartProps = {
   domain: string;

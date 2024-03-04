@@ -8,6 +8,10 @@ includes:
     dir: ./3-validation/
     taskfile: ./3-validation/Taskfile.yaml
 
+  manifests:
+    dir: ./2-resources/
+    taskfile: ./2-resources/Taskfile.yaml
+
 tasks:
   docs:watch:
     desc: Build docs
@@ -47,6 +51,44 @@ tasks:
   #-------------------------------------------------------------------------------
   # Bootstrap
   #-------------------------------------------------------------------------------
+
+  dev:bootstrap-gitea-tokens:
+    desc: Bootstraps NPM token & woodpecker-ci token
+    cmds:
+      - task: dev:gen-npm-token
+      - task: dev:create-npm-config
+      - task: dev:gen-woodpecker-gitea-token
+
+  dev:gen-npm-token:
+    desc: Generate an access token for (p)npm
+    env:
+      SCOPES: '["write:organization"]'
+    cmds:
+      - ./bin/gitea_generate_npm_token.sh
+
+  dev:create-npm-config:
+    desc: Create the NPM config for publishing & pulling packages
+    env:
+      USER: gitea-admin
+      PERSONAL_ACCESS_TOKEN: TODO
+      GITEA_API: dev-cluster.local/gitea/api/
+      REGISTRY_SCOPE: "@devcluster:registry"
+      SCOPES: '["write:organization"]'
+    dir: 2-resources
+    cmds:
+      - |
+        pnpm config set ${SCOPE} https://${GITEA_API}/packages/${USER}/npm/
+        pnpm config set -- '//${GITEA_API}/packages/${USER}/npm/:_authToken' "${PERSONAL_ACCESS_TOKEN}"
+
+  dev:gen-woodpecker-gitea-token:
+    desc: Generates a Gitea client for Woodpecker to use
+    cmd: ./bin/gitea_generate_woodpecker_token.sh
+
+  dev:gen-repo:
+    desc: Generates a repo
+    env:
+      SERVICE: "{{ .CLI_ARGS }}"
+    cmd: ./bin/gitea_create_repo.sh
 
   dev:gen-ca:
     desc: Generate a CA cert, if one does not already exist
@@ -191,15 +233,27 @@ tasks:
     dir: 1-cluster
     cmd: k3d cluster create --config k3d.yaml
 
-  manifests:01-core:
-    desc: Build Kubernetes manifests - 01-core
-    dir: 2-resources
-    cmd: time npx ts-node -r tsconfig-paths/register 01-core.ts
+  dev:busybox:
+    desc: Spin up a busybox Pod in provided namespace
+    interactive: true
+    cmds:
+      - kubectl -n {{.CLI_ARGS | default "default"}} run busybox --image=busybox --command -- sleep infinity || true
+      - kubectl -n {{.CLI_ARGS | default "default"}} wait --for=condition=ready pod/busybox --timeout=30s
+      - kubectl -n {{.CLI_ARGS | default "default"}} exec busybox -it -- sh
 
-  manifests:02-bootstrap-woodpecker:
-    desc: Build Kubernetes manifests - 02-bootstrap-woodpecker
-    dir: 2-resources
-    cmd: time npx ts-node -r tsconfig-paths/register 02-bootstrap-woodpecker.ts
+  dev:add-helm-repos:
+    desc: Adds all Helm repos
+    cmds:
+      - helm repo add istio https://istio-release.storage.googleapis.com/charts
+      - helm repo add traefik https://traefik.github.io/charts
+      - helm repo add gitea-charts https://dl.gitea.com/charts
+      - helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
+      - helm repo add woodpecker https://woodpecker-ci.org
+      - helm repo add crossplane-stable https://charts.crossplane.io/stable
+      - helm repo update
+      - helm repo ls
+
+  #-------------------------------------------------------------------------------
 
   deploy:
     desc: Deploy all resources
@@ -281,28 +335,3 @@ tasks:
           -l app=gitea \
           --for=condition=ready \
           --timeout=300s
-
-  dev:busybox:
-    desc: Spin up a busybox Pod in provided namespace
-    interactive: true
-    cmds:
-      - kubectl -n {{.CLI_ARGS | default "default"}} run busybox --image=busybox --command -- sleep infinity || true
-      - kubectl -n {{.CLI_ARGS | default "default"}} wait --for=condition=ready pod/busybox --timeout=30s
-      - kubectl -n {{.CLI_ARGS | default "default"}} exec busybox -it -- sh
-
-  dev:add-helm-repos:
-    desc: Adds all Helm repos
-    cmds:
-      - helm repo add istio https://istio-release.storage.googleapis.com/charts
-      - helm repo add traefik https://traefik.github.io/charts
-      - helm repo add gitea-charts https://dl.gitea.com/charts
-      - helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
-      - helm repo add woodpecker https://woodpecker-ci.org
-      - helm repo add crossplane-stable https://charts.crossplane.io/stable
-      - helm repo update
-      - helm repo ls
-
-  dev:watch-manifests:
-    desc: Watches manifests (cdk8s) and automatically rebulds
-    dir: 2-resources
-    cmd: pnpm tsc --build -w

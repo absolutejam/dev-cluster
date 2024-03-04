@@ -2,7 +2,7 @@ import { KubeNamespace } from "@/imports/k8s";
 import { Reflector } from "@/imports/reflector";
 import { Chart, ChartProps } from "cdk8s";
 import { Construct } from "constructs";
-import { CoreResourcesProps } from "../shared";
+import { CoreResourcesProps } from "@/utils";
 
 export type ReflectorChartProps = CoreResourcesProps & ChartProps;
 

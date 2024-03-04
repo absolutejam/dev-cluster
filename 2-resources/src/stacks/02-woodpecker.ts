@@ -1,6 +1,7 @@
+import { z } from "zod";
 import { App } from "cdk8s";
 import { loadYamlConfig } from "@/config";
-import { WoodpeckerChart } from "./resources/ext/woodpecker";
+import { WoodpeckerChart } from "@/charts/ext/woodpecker";
 import { gitea, istioGateway } from "./01-core";
 
 //------------------------------------------------------------------------------
@@ -11,6 +12,13 @@ const {
 } = config;
 
 //------------------------------------------------------------------------------
+
+const secrets = z
+  .object({
+    WOODPECKER_GITEA_CLIENT: z.string(),
+    WOODPECKER_GITEA_SECRET: z.string(),
+  })
+  .parse(process.env);
 
 const app = new App();
 
@@ -25,8 +33,8 @@ new WoodpeckerChart(app, `${EXT}-woodpecker`, {
 
   giteaConfig: {
     url: gitea.url,
-    secret: "TODO",
-    client: "TODO",
+    client: secrets.WOODPECKER_GITEA_CLIENT,
+    secret: secrets.WOODPECKER_GITEA_SECRET,
   },
 });
 

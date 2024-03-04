@@ -1,7 +1,7 @@
 import { Construct } from "constructs";
 import { KubeNamespace } from "@/imports/k8s";
 import { Chart, ChartProps } from "cdk8s";
-import { CoreResourcesProps } from "../shared";
+import { CoreResourcesProps } from "@/utils";
 import { Sealedsecrets } from "@/imports/sealed-secrets";
 
 export type SealedSecretsChartProps = CoreResourcesProps & ChartProps;

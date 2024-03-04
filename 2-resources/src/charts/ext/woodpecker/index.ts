@@ -2,7 +2,7 @@ import { VirtualService } from "@/imports/istio/networking-virtualservices-netwo
 import { KubeNamespace, KubeSecret } from "@/imports/k8s";
 import { Chart, ChartProps } from "cdk8s";
 import { Construct } from "constructs";
-import { base64, CoreResourcesProps } from "@/resources/shared";
+import { base64, CoreResourcesProps } from "@/utils";
 import { Woodpecker } from "@/imports/woodpecker";
 
 export type WoodpeckerChartProps = {

@@ -1,5 +1,6 @@
 language: typescript
 app: npx ts-node -r tsconfig-paths/register main.ts
+output: src/imports
 imports:
   - k8s
   - helm:https://charts.jetstack.io/cert-manager@1.14.3

@@ -1,0 +1,95 @@
+version: "3"
+
+tasks:
+  run-watcher:
+    desc: Watches cdk8s definitions and transpiles
+    cmd: pnpm tsc --build -w
+
+  build:stack:01-core:
+    desc: Build Kubernetes manifests - 01-core
+    cmd: time npx ts-node -r tsconfig-paths/register src/stacks/01-core.ts
+
+  build:stack:02-woodpecker:
+    desc: Build Kubernetes manifests - 02-woodpecker
+    cmd: time npx ts-node -r tsconfig-paths/register src/stacks/02-woodpecker.ts
+
+  deploy:
+    desc: Deploy all resources
+    cmds:
+      - task: deploy:core
+      - task: deploy:ext
+
+  deploy:core:
+    desc: Deploy all core resources
+    cmds:
+      - task: deploy:core:01-secrets
+      - task: deploy:core:02-certs
+      - task: deploy:core:03-istio
+
+  deploy:ext:
+    desc: Deploy all external resources
+    cmds:
+      - task: deploy:core:gitea
+
+  deploy:core:01-secrets:
+    desc: Deploy - Secrets
+    dir: dist
+    cmds:
+      - kubectl apply -f cluster-core-sealed-secrets.k8s.yaml
+      - kubectl apply -f cluster-core-reflector.k8s.yaml
+
+  deploy:core:02-certs:
+    desc: Deploy - Certs
+    dir: dist
+    cmds:
+      - kubectl apply -f cluster-core-cert-manager.k8s.yaml
+      - |
+        kubectl -n cluster-core-cert-manager wait \
+          pod \
+          -l app.kubernetes.io/component=webhook \
+          --for=condition=ready \
+          --timeout=120s
+
+      - kubectl apply -f cluster-core-trust-manager.k8s.yaml
+      - |
+        kubectl -n cluster-core-trust-manager wait \
+          pod \
+          -l app=trust-manager \
+          --for=condition=ready \
+          --timeout=120s
+
+      - kubectl apply -f cluster-core-cluster-certs.k8s.yaml
+
+  deploy:core:03-istio:
+    desc: Deploy - Istio
+    dir: dist
+    cmds:
+      - kubectl apply -f cluster-core-istio.k8s.yaml
+      - |
+        kubectl -n cluster-core-istio wait \
+          pod \
+          -l app=istiod \
+          --for=condition=ready \
+          --timeout=300s
+
+      - kubectl apply -f cluster-core-istio-gateway.k8s.yaml
+      - |
+        kubectl -n cluster-core-istio wait \
+          pod \
+          -l app=istio-gateway \
+          --for=condition=ready \
+          --timeout=300s
+
+  deploy:ext:gitea:
+    desc: Deploy - Gitea
+    dir: dist
+    # NOTE: Gitea chart currently doesn't specify namespace, so we have
+    #       to do it when applying
+    cmds:
+      - kubectl apply --namespace ext-gitea -f ext-gitea.k8s.yaml
+      - |
+        kubectl -n ext-gitea wait \
+          pod \
+          -l app=gitea \
+          --for=condition=ready \
+          --timeout=300s

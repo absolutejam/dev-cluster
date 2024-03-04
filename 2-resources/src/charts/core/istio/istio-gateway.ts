@@ -7,7 +7,7 @@ import { Gateway as IstioGatewayHelmChart } from "@/imports/gateway";
 import { KubeNamespace } from "@/imports/k8s";
 import { Chart, ChartProps } from "cdk8s";
 import { Construct } from "constructs";
-import { CoreResourcesProps } from "../shared";
+import { CoreResourcesProps } from "@/utils";
 
 export type IstioGatewayChartProps = {
   gatewayName: string;

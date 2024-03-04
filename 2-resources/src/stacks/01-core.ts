@@ -1,14 +1,14 @@
 import * as fs from "fs";
 import { App } from "cdk8s";
 import { loadYamlConfig } from "@/config";
-import { SealedSecretsChart, ReflectorChart } from "@/resources/core/secrets";
+import { SealedSecretsChart, ReflectorChart } from "@/charts/core/secrets";
 import {
   CertManagerChart,
   TrustManagerChart,
   ClusterCertsChart,
-} from "@/resources/core/certs";
-import { IstioChart, IstioGatewayChart } from "@/resources/core/istio";
-import { GiteaChart } from "@/resources/ext/gitea";
+} from "@/charts/core/certs";
+import { IstioChart, IstioGatewayChart } from "@/charts/core/istio";
+import { GiteaChart } from "@/charts/ext/gitea";
 
 //------------------------------------------------------------------------------
 
