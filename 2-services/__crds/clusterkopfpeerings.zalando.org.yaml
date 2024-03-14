@@ -1,0 +1,51 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apiextensions.k8s.io/v1","kind":"CustomResourceDefinition","metadata":{"annotations":{},"name":"clusterkopfpeerings.zalando.org"},"spec":{"group":"zalando.org","names":{"kind":"ClusterKopfPeering","plural":"clusterkopfpeerings","singular":"clusterkopfpeering"},"scope":"Cluster","versions":[{"name":"v1","schema":{"openAPIV3Schema":{"properties":{"status":{"type":"object","x-kubernetes-preserve-unknown-fields":true}},"type":"object"}},"served":true,"storage":true}]}}
+  creationTimestamp: "2024-03-04T23:20:58Z"
+  generation: 1
+  name: clusterkopfpeerings.zalando.org
+  resourceVersion: "34508"
+  uid: 4a7713a2-d00e-4ce1-9e27-e68a123c9456
+spec:
+  conversion:
+    strategy: None
+  group: zalando.org
+  names:
+    kind: ClusterKopfPeering
+    listKind: ClusterKopfPeeringList
+    plural: clusterkopfpeerings
+    singular: clusterkopfpeering
+  scope: Cluster
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          status:
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+        type: object
+    served: true
+    storage: true
+status:
+  acceptedNames:
+    kind: ClusterKopfPeering
+    listKind: ClusterKopfPeeringList
+    plural: clusterkopfpeerings
+    singular: clusterkopfpeering
+  conditions:
+  - lastTransitionTime: "2024-03-04T23:20:58Z"
+    message: no conflicts found
+    reason: NoConflicts
+    status: "True"
+    type: NamesAccepted
+  - lastTransitionTime: "2024-03-04T23:20:58Z"
+    message: the initial names have been accepted
+    reason: InitialNamesAccepted
+    status: "True"
+    type: Established
+  storedVersions:
+  - v1

@@ -11,7 +11,7 @@ domain=$(yq '.vars.domain' <<<"${config}")
 [ -z "${password}" ] && echo "password is required" && exit 1
 [ -z "${domain}" ] && echo "domain is required" && exit 1
 
-gitea_api=https://${domain}/gitea/api/v1
+gitea_api=https://gitea.${domain}/api/v1
 curl_opts="-s"
 
 #-------------------------------------------------------------------------------
@@ -52,6 +52,24 @@ function generate_token() {
 {
   "name": "${TOKEN}",
   "scopes": ${SCOPES}
+}
+EOF
+}
+
+function generate_oauth_client() {
+	[ -z "${CLIENT_NAME}" ] && echo "CLIENT_NAME is required" && exit 1
+	[ -z "${REDIRECT_URI}" ] && echo "REDIRECT_URI is required" && exit 1
+
+	curl -POST ${curl_opts} \
+		"${gitea_api}/user/applications/oauth2" \
+		-H "Content-Type: application/json" \
+		-H "accept: application/json" \
+		-u "${username}:${password}" \
+		-d @- <<EOF
+{
+  "name": "${CLIENT_NAME}",
+  "confidential_client": true,
+  "redirect_uris": ["${REDIRECT_URI}"]
 }
 EOF
 }

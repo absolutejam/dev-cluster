@@ -1,0 +1,135 @@
+# NOTE:
+#      annotations:
+#        sidecar.istio.io/logLevel: debug
+---
+# kind: Gateway
+# apiVersion: networking.istio.io/v1beta1
+# metadata:
+#   name: gitea-internal
+#   namespace: ext-woodpecker
+# spec:
+#   servers:
+#     - port:
+#         name: http
+#         number: 80
+#         protocol: HTTP
+#       hosts:
+#         - gitea-http.ext-gitea.svc.cluster.local
+#     - port:
+#         name: https
+#         number: 443
+#         protocol: HTTPS
+#       hosts:
+#         - gitea-http.ext-gitea.svc.cluster.local
+#       tls:
+#         mode: ISTIO_MUTUAL
+#   selector:
+#     istio: egressgateway
+# ---
+# apiVersion: cert-manager.io/v1
+# kind: Certificate
+# metadata:
+#   name: gitea-internal
+#   namespace: ext-woodpecker
+# spec:
+#   commonName: gitea.dev-cluster.local
+#   dnsNames:
+#     - gitea.dev-cluster.local
+#   issuerRef:
+#     group: cert-manager.io
+#     kind: ClusterIssuer
+#     name: root-ca
+#   secretName: gitea-internal
+---
+# apiVersion: networking.istio.io/v1alpha3
+# kind: DestinationRule
+# metadata:
+#   name: gitea-internal
+#   namespace: ext-woodpecker
+# spec:
+#   host: default-gateway.core-istio.svc.cluster.local
+#   exportTo: ["."]
+#   trafficPolicy:
+#     portLevelSettings:
+#       - port:
+#           number: 443
+#         tls:
+#           mode: ISTIO_MUTUAL
+#           #credentialName: gitea-internal
+#           sni: gitea.dev-cluster.local
+
+#
+# NOTE: This will use the internal PKI (self-signed)
+#
+---
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: gitea-internal
+  namespace: ext-woodpecker
+spec:
+  exportTo: ["."]
+  hosts:
+    - gitea.dev-cluster.local
+
+  # endpoints:
+  #   - address: istio-gateway.core-istio.svc.cluster.local
+
+  resolution: DNS
+  ports:
+    # - name: http
+    #   number: 80
+    #   targetPort: 80
+    #   protocol: HTTP
+
+    - name: https
+      number: 443
+      targetPort: 443
+      protocol: HTTPS
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: gitea-internal
+  namespace: ext-woodpecker
+spec:
+  gateways:
+    - mesh
+  hosts:
+    - gitea.dev-cluster.local
+
+  # NOTE: HTTP currently not redirecting
+  # http:
+  #   - match:
+  #       - port: 80
+  #         gateways: [mesh]
+  #     # redirect:
+  #     #   authority: istio-gateway.core-istio.svc.cluster.local
+  #     #   port: 443
+  #     #   scheme: https
+  #     route:
+  #       - destination:
+  #           host: istio-gateway.core-istio.svc.cluster.local
+  #           port:
+  #             number: 80
+  tls:
+    - match:
+        - port: 443
+          gateways: [mesh]
+          sniHosts:
+            - gitea.dev-cluster.local
+      route:
+        - destination:
+            host: istio-gateway.core-istio.svc.cluster.local
+            port:
+              number: 443
+---
+apiVersion: telemetry.istio.io/v1alpha1
+kind: Telemetry
+metadata:
+  name: envoy
+  namespace: ext-woodpecker
+spec:
+  accessLogging:
+    - providers:
+        - name: envoy

@@ -1,0 +1,317 @@
+version: "3"
+
+vars:
+  IMPORTS: ./packages/shared/src/imports
+
+tasks:
+  #-----------------------------------------------------------------------------
+  # Utils
+  #-----------------------------------------------------------------------------
+
+  run-watcher:
+    desc: Watches cdk8s definitions and transpiles
+    cmd: pnpm tsc --build -w
+
+  transpile:
+    desc: Transpile all cdk8s definitions
+    cmd: pnpm tsc --build
+    run: when_changed
+    method: checksum
+    sources:
+      - ./**/*.ts
+
+  sync-configs:
+    desc: Syncs template files to each service
+    cmd: |
+      for service in ./services/*; do
+        cp __template/* "${service}/"
+        ls "${service}"
+      done
+
+  clean:
+    internal: true
+    cmd: rm dist/*.yaml
+
+  build:
+    desc: Build all
+    deps:
+      - build:core
+      - build:gitea
+      - build:woodpecker
+      - build:crossplane
+      - build:kubernetes-dashboard
+      - build:kiali
+      - build:mysql
+
+  #-----------------------------------------------------------------------------
+  # cdk8s
+  #-----------------------------------------------------------------------------
+  cdk8s:import:
+    desc: cdk8s import
+    cmd: "cdk8s import -o {{ .IMPORTS }} {{ .CLI_ARGS }}"
+
+  cdk8s:export-crds:
+    desc: Export all CRDs from the cluster
+    shopt:
+      - globstar
+    vars:
+      CRD_DIR: __crds
+    cmds:
+      - cmd: mkdir -p {{ .CRD_DIR }}
+        silent: true
+
+      # NOTE: Stops looping after first `kubectl` if not explicitly run via. bash
+      - cmd: |
+          bash -c '
+            crds=$(kubectl get crd -o custom-columns="NAME:.metadata.name" --no-headers)
+            while read -r crd; do
+              echo "Exporting ${crd}"
+              kubectl get crd "${crd}" -o yaml > "{{ .CRD_DIR }}/${crd}.yaml"
+            done <<< "${crds}"
+          '
+        silent: true
+
+  cdk8s:import-crds:
+    desc: Import all CRDs into cdk8s
+    vars:
+      CRD_DIR: __crds
+    cmds:
+      - task: cdk8s:import-crds:sealed-secrets
+      - task: cdk8s:import-crds:cert-manager
+      - task: cdk8s:import-crds:trust-manager
+      - task: cdk8s:import-crds:istio
+
+  cdk8s:import-crds:istio:apply-fixes:
+    desc: Fixes duplicate definitions
+    cmds:
+      - silent: true
+        cmd: |
+          bash -c '
+            file="{{ .IMPORTS }}/istio/security-requestauthentications-security.istio.io.ts"
+            echo "Fixing ${file}"
+
+            lines=('189' '573')
+            for line in "${lines[@]}"; do
+                echo "Updating line ${line}"
+                gsed -i "${line}s#readonly jwksUri#readonly jwks_uri#" "${file}"
+            done
+          '
+
+      - silent: true
+        cmd: |
+          bash -c '
+            file="{{ .IMPORTS }}/istio/networking-virtualservices-networking.istio.io.ts"
+            echo "Fixing ${file}"
+
+            lines=('221' '2538')
+            for line in "${lines[@]}"; do
+                echo "Updating line ${line}"
+                gsed -i "${line}s#readonly mirrorPercent#readonly mirror_percent#" "${file}"
+              done
+          '
+
+  #-----------------------------------------------------------------------------
+  # Core
+  #-----------------------------------------------------------------------------
+
+  build:core:
+    desc: Build Kubernetes manifests - core
+    deps: [transpile]
+    cmd: time npx ts-node -r tsconfig-paths/register services/core/src/main.ts
+
+  deploy:core:
+    desc: Deploy all core resources
+    deps:
+      - build:core
+    cmds:
+      - task: deploy:core:01-secrets
+      - task: deploy:core:02-certs
+      - task: deploy:core:03-istio
+
+  deploy:core:01-secrets:
+    desc: Deploy - core - Secrets
+    dir: dist
+    deps: [build:core]
+    cmds:
+      - kubectl apply -f core-sealed-secrets.k8s.yaml
+      - kubectl apply -f core-reflector.k8s.yaml
+
+  deploy:core:02-certs:
+    desc: Deploy - core - Certs
+    dir: dist
+    deps: [build:core]
+    cmds:
+      - kubectl apply -f core-cert-manager.k8s.yaml
+      - |
+        kubectl wait pod \
+          --namespace core-cert-manager \
+          -l app.kubernetes.io/component=webhook \
+          --for=condition=ready \
+          --timeout=120s
+
+      - kubectl apply -f core-trust-manager.k8s.yaml
+      - |
+        kubectl wait pod \
+          --namespace core-trust-manager \
+          -l app=trust-manager \
+          --for=condition=ready \
+          --timeout=120s
+
+      - kubectl apply -f core-cluster-certs.k8s.yaml
+
+  deploy:core:03-istio:
+    desc: Deploy - core - Istio
+    dir: dist
+    deps: [build:core]
+    cmds:
+      - kubectl apply -f core-istio.k8s.yaml
+      - |
+        kubectl wait pod \
+          --namespace core-istio \
+          -l app=istiod \
+          --for=condition=ready \
+          --timeout=300s
+
+      - kubectl apply -f core-istio-gateway.k8s.yaml
+      - |
+        kubectl wait pod \
+          --namespace core-istio \
+          -l app=istio-gateway \
+          --for=condition=ready \
+          --timeout=300s
+
+  #-----------------------------------------------------------------------------
+  # Woodpecker
+  #-----------------------------------------------------------------------------
+
+  build:woodpecker:
+    desc: Build Kubernetes manifests - woodpecker
+    deps: [transpile]
+    cmd: time npx ts-node -r tsconfig-paths/register services/woodpecker/src/main.ts
+
+  deploy:woodpecker:
+    desc: Deploy woodpecker resources
+    dir: dist
+    deps: [build:woodpecker]
+    cmds:
+      - kubectl apply --namespace ext-woodpecker -f ext-woodpecker.k8s.yaml
+      - |
+        kubectl wait pod \
+          --namespace ext-woodpecker \
+          -l app.kubernetes.io/instance=woodpecker,app.kubernetes.io/name=server \
+          --for=condition=ready \
+          --timeout=300s
+
+  #-----------------------------------------------------------------------------
+  # Services
+  #-----------------------------------------------------------------------------
+
+  build:gitea:
+    desc: Build manifests - gitea
+    cmd:
+      task: build:service
+      vars: { SERVICE: "gitea" }
+
+  deploy:gitea:
+    desc: Deploy manifests - gitea
+    dir: dist
+    deps: [build:gitea]
+    cmds:
+      - kubectl apply -n ext-gitea -f ext-gitea.k8s.yaml
+      - |
+        kubectl wait pod \
+          --namespace ext-gitea \
+          -l app=gitea \
+          --for=condition=ready \
+          --timeout=300s
+
+  #-----------------------------------------------------------------------------
+
+  build:crossplane:
+    desc: Build manifests - crossplane
+    cmd:
+      task: build:service
+      vars: { SERVICE: "crossplane" }
+
+  deploy:crossplane:
+    desc: Deploy manifests - crossplane
+    dir: dist
+    deps: [build:crossplane]
+    cmds:
+      - kubectl apply -n inf-crossplane -f inf-crossplane.k8s.yaml
+
+  #-----------------------------------------------------------------------------
+
+  build:kiali:
+    desc: Build manifests - kiali
+    cmd:
+      task: build:service
+      vars: { SERVICE: "kiali" }
+
+  deploy:kiali:
+    desc: Deploy manifests - kiali
+    dir: dist
+    deps: [build:kiali]
+    cmds:
+      - kubectl apply -n obs-kiali -f obs-kiali.k8s.yaml
+
+  #-----------------------------------------------------------------------------
+
+  build:kubernetes-dashboard:
+    desc: Build manifests - kubernetes-dashboard
+    cmd:
+      task: build:service
+      vars: { SERVICE: "kubernetes-dashboard" }
+
+  deploy:kubernetes-dashboard:
+    desc: Deploy manifests - kubernetes-dashboard
+    dir: dist
+    deps: [build:kubernetes-dashboard]
+    cmds:
+      - kubectl apply -n obs-kubernetes-dashboard -f obs-kubernetes-dashboard.k8s.yaml
+
+  #-----------------------------------------------------------------------------
+
+  build:falco:
+    desc: Build manifests - falco
+    cmd:
+      task: build:service
+      vars: { SERVICE: "falco" }
+
+  deploy:falco:
+    desc: Deploy manifests - falco
+    dir: dist
+    deps: [build:falco]
+    cmds:
+      - kubectl apply --namespace obs-falco -f obs-falco.k8s.yaml
+
+  #-----------------------------------------------------------------------------
+
+  build:mysql:
+    desc: Build manifests - mysql
+    cmd:
+      task: build:service
+      vars: { SERVICE: "mysql" }
+
+  deploy:mysql:
+    desc: Deploy manifests - mysql
+    deps: [build:mysql]
+    dir: dist
+    cmds:
+      - kubectl apply --namespace inf-mysql-operator -f mysql-operator.k8s.yaml
+      - kubectl apply --namespace inf-mysql-operator -f mysql-cluster.k8s.yaml
+
+  #-----------------------------------------------------------------------------
+  # Internal
+  #-----------------------------------------------------------------------------
+
+  build:service:
+    internal: true
+    deps: [transpile]
+    cmd: time npx ts-node -r tsconfig-paths/register services/{{ .SERVICE }}/src/main.ts
+    requires:
+      vars: [SERVICE]
+    sources:
+      - src/**/*.ts
+    generates:
+      - src/**/*.js

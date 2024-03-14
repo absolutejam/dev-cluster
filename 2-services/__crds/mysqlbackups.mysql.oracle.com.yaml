@@ -1,0 +1,203 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apiextensions.k8s.io/v1","kind":"CustomResourceDefinition","metadata":{"annotations":{},"name":"mysqlbackups.mysql.oracle.com"},"spec":{"group":"mysql.oracle.com","names":{"kind":"MySQLBackup","listKind":"MySQLBackupList","plural":"mysqlbackups","shortNames":["mbk"],"singular":"mysqlbackup"},"scope":"Namespaced","versions":[{"additionalPrinterColumns":[{"description":"Name of the target cluster","jsonPath":".spec.clusterName","name":"Cluster","type":"string"},{"description":"Status of the Backup","jsonPath":".status.status","name":"Status","type":"string"},{"description":"Name of the produced file/directory","jsonPath":".status.output","name":"Output","type":"string"},{"jsonPath":".metadata.creationTimestamp","name":"Age","type":"date"}],"name":"v2","schema":{"openAPIV3Schema":{"properties":{"spec":{"properties":{"addTimestampToBackupDirectory":{"default":true,"type":"boolean"},"backupProfile":{"description":"backupProfile specification if backupProfileName is not specified","properties":{"dumpInstance":{"properties":{"dumpOptions":{"description":"A dictionary of key-value pairs passed directly to MySQL Shell's DumpInstance()","type":"object","x-kubernetes-preserve-unknown-fields":true},"storage":{"properties":{"azure":{"properties":{"config":{"description":"Name of a Secret with Azure BLOB Storage configuration and credentials","type":"string"},"containerName":{"description":"Name of the Azure  BLOB Storage container where the dump is stored","type":"string"},"prefix":{"description":"Path in the container where the dump files are stored","type":"string"}},"required":["containerName","config"],"type":"object"},"ociObjectStorage":{"properties":{"bucketName":{"description":"Name of the OCI bucket where backup is stored","type":"string"},"credentials":{"description":"Name of a Secret with data for accessing the bucket","type":"string"},"prefix":{"description":"Path in bucket where backup is stored","type":"string"}},"required":["bucketName","credentials"],"type":"object"},"persistentVolumeClaim":{"description":"Specification of the PVC to be used. Used 'as is' in pod executing the backup.","type":"object","x-kubernetes-preserve-unknown-fields":true},"s3":{"properties":{"bucketName":{"description":"Name of the S3 bucket where the dump is stored","type":"string"},"config":{"description":"Name of a Secret with S3 configuration and credentials","type":"string"},"endpoint":{"description":"Override endpoint URL","type":"string"},"prefix":{"description":"Path in the bucket where the dump files are stored","type":"string"},"profile":{"default":"","description":"Profile being used in configuration files","type":"string"}},"required":["bucketName","config"],"type":"object"}},"type":"object","x-kubernetes-preserve-unknown-fields":true}},"type":"object"},"podAnnotations":{"type":"object","x-kubernetes-preserve-unknown-fields":true},"podLabels":{"type":"object","x-kubernetes-preserve-unknown-fields":true}},"type":"object","x-kubernetes-preserve-unknown-fields":true},"backupProfileName":{"type":"string"},"clusterName":{"type":"string"},"deleteBackupData":{"default":false,"type":"boolean"}},"required":["clusterName"],"type":"object"},"status":{"properties":{"bucket":{"type":"string"},"completionTime":{"type":"string"},"container":{"type":"string"},"elapsedTime":{"type":"string"},"message":{"type":"string"},"method":{"type":"string"},"ociTenancy":{"type":"string"},"output":{"type":"string"},"size":{"type":"string"},"source":{"type":"string"},"spaceAvailable":{"type":"string"},"startTime":{"type":"string"},"status":{"type":"string"}},"type":"object"}},"type":"object"}},"served":true,"storage":true,"subresources":{"status":{}}}]}}
+  creationTimestamp: "2024-03-04T23:20:58Z"
+  generation: 1
+  name: mysqlbackups.mysql.oracle.com
+  resourceVersion: "34505"
+  uid: f6dad5e9-7963-4196-a89c-043323436830
+spec:
+  conversion:
+    strategy: None
+  group: mysql.oracle.com
+  names:
+    kind: MySQLBackup
+    listKind: MySQLBackupList
+    plural: mysqlbackups
+    shortNames:
+    - mbk
+    singular: mysqlbackup
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Name of the target cluster
+      jsonPath: .spec.clusterName
+      name: Cluster
+      type: string
+    - description: Status of the Backup
+      jsonPath: .status.status
+      name: Status
+      type: string
+    - description: Name of the produced file/directory
+      jsonPath: .status.output
+      name: Output
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v2
+    schema:
+      openAPIV3Schema:
+        properties:
+          spec:
+            properties:
+              addTimestampToBackupDirectory:
+                default: true
+                type: boolean
+              backupProfile:
+                description: backupProfile specification if backupProfileName is not
+                  specified
+                properties:
+                  dumpInstance:
+                    properties:
+                      dumpOptions:
+                        description: A dictionary of key-value pairs passed directly
+                          to MySQL Shell's DumpInstance()
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      storage:
+                        properties:
+                          azure:
+                            properties:
+                              config:
+                                description: Name of a Secret with Azure BLOB Storage
+                                  configuration and credentials
+                                type: string
+                              containerName:
+                                description: Name of the Azure  BLOB Storage container
+                                  where the dump is stored
+                                type: string
+                              prefix:
+                                description: Path in the container where the dump
+                                  files are stored
+                                type: string
+                            required:
+                            - containerName
+                            - config
+                            type: object
+                          ociObjectStorage:
+                            properties:
+                              bucketName:
+                                description: Name of the OCI bucket where backup is
+                                  stored
+                                type: string
+                              credentials:
+                                description: Name of a Secret with data for accessing
+                                  the bucket
+                                type: string
+                              prefix:
+                                description: Path in bucket where backup is stored
+                                type: string
+                            required:
+                            - bucketName
+                            - credentials
+                            type: object
+                          persistentVolumeClaim:
+                            description: Specification of the PVC to be used. Used
+                              'as is' in pod executing the backup.
+                            type: object
+                            x-kubernetes-preserve-unknown-fields: true
+                          s3:
+                            properties:
+                              bucketName:
+                                description: Name of the S3 bucket where the dump
+                                  is stored
+                                type: string
+                              config:
+                                description: Name of a Secret with S3 configuration
+                                  and credentials
+                                type: string
+                              endpoint:
+                                description: Override endpoint URL
+                                type: string
+                              prefix:
+                                description: Path in the bucket where the dump files
+                                  are stored
+                                type: string
+                              profile:
+                                default: ""
+                                description: Profile being used in configuration files
+                                type: string
+                            required:
+                            - bucketName
+                            - config
+                            type: object
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                    type: object
+                  podAnnotations:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  podLabels:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+              backupProfileName:
+                type: string
+              clusterName:
+                type: string
+              deleteBackupData:
+                default: false
+                type: boolean
+            required:
+            - clusterName
+            type: object
+          status:
+            properties:
+              bucket:
+                type: string
+              completionTime:
+                type: string
+              container:
+                type: string
+              elapsedTime:
+                type: string
+              message:
+                type: string
+              method:
+                type: string
+              ociTenancy:
+                type: string
+              output:
+                type: string
+              size:
+                type: string
+              source:
+                type: string
+              spaceAvailable:
+                type: string
+              startTime:
+                type: string
+              status:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+status:
+  acceptedNames:
+    kind: MySQLBackup
+    listKind: MySQLBackupList
+    plural: mysqlbackups
+    shortNames:
+    - mbk
+    singular: mysqlbackup
+  conditions:
+  - lastTransitionTime: "2024-03-04T23:20:58Z"
+    message: no conflicts found
+    reason: NoConflicts
+    status: "True"
+    type: NamesAccepted
+  - lastTransitionTime: "2024-03-04T23:20:58Z"
+    message: the initial names have been accepted
+    reason: InitialNamesAccepted
+    status: "True"
+    type: Established
+  storedVersions:
+  - v2

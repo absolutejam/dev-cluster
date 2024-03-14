@@ -3,19 +3,19 @@ version: "3"
 env:
   CDK8S_CHECK_UPGRADE: false
   K3D_CLUSTER: lab
-  KUBECONFIG: ./1-cluster/kubeconfig.yaml
+  # KUBECONFIG: ./secrets/kubeconfig.yaml
 
 includes:
   validation:
-    dir: ./3-validation/
+    dir: ./3-validation
     taskfile: ./3-validation/Taskfile.yaml
 
-  manifests:
-    dir: ./2-resources/
-    taskfile: ./2-resources/Taskfile.yaml
+  services:
+    dir: ./2-services
+    taskfile: ./2-services/Taskfile.yaml
 
   docs:
-    dir: ./docs/
+    dir: ./docs
     taskfile: ./docs/Taskfile.yaml
 
 tasks:
@@ -23,23 +23,37 @@ tasks:
   # High level
   #-------------------------------------------------------------------------------
 
-  bootstrap:
+  up:
     desc: 🚀 Bootstraps the cluster core
     cmds:
       - task: deps:check
       - task: dev:gen-ca
+      - task: clean
+      - task: services:transpile
       - task: cluster:up
+      - task: dev:build-woodpecker-image
 
       # Core
-      - task: manifests:build:01-core
-      - task: manifests:deploy:core
+      - task: services:deploy:core
       - task: validation:pki
 
+      # Gitea
+      - task: services:deploy:gitea
+
       # Woodpecker
-      - task: dev:gen-woodpecker-gitea-token
-      - task: dev:gen-npm-token
-      - task: manifests:build:02-woodpecker
-      # - task: manifests:deploy:woodpecker
+      - task: services:deploy:woodpecker
+      - task: dev:gen-woodpecker-oauth-client
+
+  down:
+    cmds:
+      - k3d cluster rm --config 1-cluster/k3d.yaml
+
+  clean:
+    desc: Clean any temporary files
+    cmds:
+      # TODO: Use `git clean`?
+      - rm secrets/kubeconfig.yaml || true
+      - rm secrets/woodpecker-oauth2-client.json || true
 
   #-------------------------------------------------------------------------------
   # Cluster
@@ -47,10 +61,13 @@ tasks:
 
   cluster:up:
     desc: Spin up the K3d cluster
+    env:
+      KUBECONFIG: "" # to get Kubeconfig merged
+    dir: ./1-cluster
     cmds:
       - silent: true
         cmd: |
-          cluster_output=$(k3d cluster ls --no-headers | grep "{{ .K3D_CLUSTER }}")
+          cluster_output=$(k3d cluster ls --no-headers | grep "{{ .K3D_CLUSTER }}" || true)
 
           if [ -n "${cluster_output}" ]; then
             cat <<EOF
@@ -62,10 +79,21 @@ tasks:
 
           EOF
           else
-            k3d cluster create --config 1-cluster/k3d.yaml
+            if [ {{ .USE_CALICO | default "false" }} == "true" ]; then 
+              extra_args="--volume \"$(pwd)/manifests:/var/lib/rancher/k3s/server/manifests/calico.yaml@server:*\""
+              extra_args="${extra_args} --flannel-backend=\"none@server:*\""
+            fi
+
+            k3d cluster create --config k3d.yaml ${extra_args}
           fi
 
-          k3d kubeconfig get lab > 1-cluster/kubeconfig.yaml
+          k3d kubeconfig get lab > ../secrets/kubeconfig.yaml
+
+          kubectl wait pod \
+            --namespace kube-system \
+            -l k8s-app=kube-dns \
+            --for=condition=ready \
+            --timeout=300s
 
   #-------------------------------------------------------------------------------
   # Dependencies
@@ -74,8 +102,8 @@ tasks:
   deps:check:
     desc: Checks all required tools are installed
     cmds:
-      - which ck8s
-      - which k3d
+      - which k3d > /dev/null
+      - which kubectl > /dev/null
 
   deps:install:
     desc: Install required binaries & tools
@@ -101,13 +129,6 @@ tasks:
   # Dev tasks
   #-------------------------------------------------------------------------------
 
-  dev:bootstrap-gitea-tokens:
-    desc: Bootstraps NPM token & woodpecker-ci token
-    cmds:
-      - task: dev:gen-npm-token
-      - task: dev:create-npm-config
-      - task: dev:gen-woodpecker-gitea-token
-
   dev:gen-npm-token:
     desc: Generate an access token for (p)npm
     env:
@@ -123,15 +144,15 @@ tasks:
       GITEA_API: dev-cluster.local/gitea/api/
       REGISTRY_SCOPE: "@devcluster:registry"
       SCOPES: '["write:organization"]'
-    dir: 2-resources
+    dir: 2-services
     cmds:
       - |
         pnpm config set ${SCOPE} https://${GITEA_API}/packages/${USER}/npm/
         pnpm config set -- '//${GITEA_API}/packages/${USER}/npm/:_authToken' "${PERSONAL_ACCESS_TOKEN}"
 
-  dev:gen-woodpecker-gitea-token:
+  dev:gen-woodpecker-oauth-client:
     desc: Generates a Gitea client for Woodpecker to use
-    cmd: ./bin/gitea_generate_woodpecker_token.sh
+    cmd: ./bin/gitea_generate_woodpecker_oauth_client.sh
 
   dev:gen-repo:
     desc: Generates a repo
@@ -142,10 +163,15 @@ tasks:
   dev:gen-ca:
     desc: Generate a CA cert, if one does not already exist
     dir: pki
-    preconditions:
-      - sh: "[ ! -f ca.pem ]"
-        msg: A CA cert already exists
-    cmd: cfssl gencert -initca ca-csr.json | cfssljson -bare ca -
+    cmds:
+      - silent: true
+        cmd: |
+          if [ -f "ca.pem" ]; then
+            echo "CA cert already exists"
+            exit 0
+          fi
+
+          cfssl gencert -initca ca-csr.json | cfssljson -bare ca -
 
   dev:trust-ca:
     desc: Trusts the generated CA cert
@@ -160,130 +186,27 @@ tasks:
         -k /Library/Keychains/System.keychain \
         ca.pem
 
-  dev:export-crds:
-    desc: Export all CRDs from the cluster
-    dir: 2-resources/
-    shopt:
-      - globstar
+  dev:build-woodpecker-image:
+    desc: Build woodpecker plugin-git image
     vars:
-      CRD_DIR: __crds
+      IMAGE_NAME: woodpecker/plugin-git
+      REGISTRY: k3d-registry.localhost:5000
     cmds:
-      - cmd: mkdir -p {{.CRD_DIR}}
-        silent: true
+      - cp pki/ca.pem 99-others/woodpecker/plugin-git
+      - docker build -t {{ .REGISTRY }}/{{ .IMAGE_NAME }} 99-others/woodpecker/plugin-git
+      - docker push {{ .REGISTRY }}/{{ .IMAGE_NAME }}
 
-      # NB: Stops looping after first `kubectl` if not explicitly run via. bash
-      - cmd: |
-          bash -c '
-            crds=$(kubectl get crd -o custom-columns="NAME:.metadata.name" --no-headers)
-            while read -r crd; do
-              echo "Exporting ${crd}"
-              kubectl get crd "${crd}" -o yaml > "{{.CRD_DIR}}/${crd}.yaml"
-            done <<< "${crds}"
-          '
-        silent: true
-
-  dev:import-crds:
-    desc: Import all CRDs into cdk8s
-    dir: 2-resources/
-    vars:
-      CRD_DIR: __crds
-    cmds:
-      - task: dev:import-crds:sealed-secrets
-      - task: dev:import-crds:cert-manager
-      - task: dev:import-crds:trust-manager
-      - task: dev:import-crds:istio
-
-  dev:import-crds:sealed-secrets:
-    desc: Import CRDs into cdk8s - sealed-secrets
-    dir: 2-resources/
-    vars:
-      CRD_DIR: __crds
-    cmd: |
-      cdk8s import sealed-secrets/sealedsecrets:={{.CRD_DIR}}/sealedsecrets.bitnami.com.yaml
-
-  dev:import-crds:cert-manager:
-    desc: Import CRDs into cdk8s - cert-manager
-    dir: 2-resources/
-    vars:
-      CRD_DIR: __crds
-    cmd: |
-      cdk8s import cert-manager/certificaterequests:={{.CRD_DIR}}/certificaterequests.cert-manager.io.yaml
-      cdk8s import cert-manager/certificates:={{.CRD_DIR}}/certificates.cert-manager.io.yaml
-      cdk8s import cert-manager/challenges:={{.CRD_DIR}}/challenges.acme.cert-manager.io.yaml
-      cdk8s import cert-manager/clusterissuers:={{.CRD_DIR}}/clusterissuers.cert-manager.io.yaml
-      cdk8s import cert-manager/issuers:={{.CRD_DIR}}/issuers.cert-manager.io.yaml
-      cdk8s import cert-manager/orders:={{.CRD_DIR}}/orders.acme.cert-manager.io.yaml
-
-  dev:import-crds:trust-manager:
-    desc: Import CRDs into cdk8s - trust-manager
-    dir: 2-resources/
-    vars:
-      CRD_DIR: __crds
-    cmd: |
-      cdk8s import trust-manager/bundles:={{.CRD_DIR}}/bundles.trust.cert-manager.io.yaml
-
-  dev:import-crds:istio:
-    desc: Import CRDs into cdk8s - istio
-    dir: 2-resources/
-    vars:
-      CRD_DIR: __crds
-    cmds:
-      - |
-        cdk8s import istio/security-authorizationpolicies:={{.CRD_DIR}}/authorizationpolicies.security.istio.io.yaml
-        cdk8s import istio/networking-destinationrules:={{.CRD_DIR}}/destinationrules.networking.istio.io.yaml
-        cdk8s import istio/networking-envoyfilters:={{.CRD_DIR}}/envoyfilters.networking.istio.io.yaml
-        cdk8s import istio/networking-gateways:={{.CRD_DIR}}/gateways.networking.istio.io.yaml
-        cdk8s import istio/install-istiooperators:={{.CRD_DIR}}/istiooperators.install.istio.io.yaml
-        cdk8s import istio/security-peerauthentications:={{.CRD_DIR}}/peerauthentications.security.istio.io.yaml
-        cdk8s import istio/networking-proxyconfigs:={{.CRD_DIR}}/proxyconfigs.networking.istio.io.yaml
-        cdk8s import istio/security-requestauthentications:={{.CRD_DIR}}/requestauthentications.security.istio.io.yaml
-        cdk8s import istio/networking-serviceentries:={{.CRD_DIR}}/serviceentries.networking.istio.io.yaml
-        cdk8s import istio/networking-sidecars:={{.CRD_DIR}}/sidecars.networking.istio.io.yaml
-        cdk8s import istio/telemetry-telemetries:={{.CRD_DIR}}/telemetries.telemetry.istio.io.yaml
-        cdk8s import istio/networking-virtualservices:={{.CRD_DIR}}/virtualservices.networking.istio.io.yaml
-        cdk8s import istio/extensions-wasmplugins:={{.CRD_DIR}}/wasmplugins.extensions.istio.io.yaml
-        cdk8s import istio/networking-workloadentries:={{.CRD_DIR}}/workloadentries.networking.istio.io.yaml
-        cdk8s import istio/networking-workloadgroups:={{.CRD_DIR}}/workloadgroups.networking.istio.io.yaml
-
-      - task: dev:import-crds:istio:apply-fixes
-
-  dev:import-crds:istio:apply-fixes:
-    desc: Fixes duplicate definitions
-    dir: 2-resources
-    cmds:
-      - silent: true
-        cmd: |
-          bash -c '
-            file="imports/istio/security-requestauthentications-security.istio.io.ts"
-            echo "Fixing ${file}"
-
-            lines=('189' '573')
-            for line in "${lines[@]}"; do
-                echo "Updating line ${line}"
-                gsed -i "${line}s#readonly jwksUri#readonly jwks_uri#" "${file}"
-            done
-          '
-
-      - silent: true
-        cmd: |
-          bash -c '
-            file="imports/istio/networking-virtualservices-networking.istio.io.ts"
-            echo "Fixing ${file}"
-
-            lines=('221' '2538')
-            for line in "${lines[@]}"; do
-                echo "Updating line ${line}"
-                gsed -i "${line}s#readonly mirrorPercent#readonly mirror_percent#" "${file}"
-              done
-          '
-
-  dev:busybox:
-    desc: Spin up a busybox Pod in provided namespace
+  dev:tools:
+    desc: Spin up a tools Pod in provided namespace
     interactive: true
+    vars:
+      POD_NAME: tools
+      NAMESPACE: '{{ .CLI_ARGS | default "default" }}'
+      IMAGE: alpine:latest
     cmds:
-      - kubectl -n {{.CLI_ARGS | default "default"}} run busybox --image=busybox --command -- sleep infinity || true
-      - kubectl -n {{.CLI_ARGS | default "default"}} wait --for=condition=ready pod/busybox --timeout=30s
-      - kubectl -n {{.CLI_ARGS | default "default"}} exec busybox -it -- sh
+      - kubectl -n {{ .NAMESPACE }} run {{ .POD_NAME }} --image={{ .IMAGE }} --command -- sleep infinity || true
+      - kubectl -n {{ .NAMESPACE }} wait --for=condition=ready pod/{{ .POD_NAME }} --timeout=30s
+      - kubectl -n {{ .NAMESPACE }} exec {{ .POD_NAME }} -it -- sh
 
   dev:add-helm-repos:
     desc: Adds all Helm repos
@@ -294,5 +217,9 @@ tasks:
       - helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
       - helm repo add woodpecker https://woodpecker-ci.org
       - helm repo add crossplane-stable https://charts.crossplane.io/stable
+      - helm repo add kiali https://kiali.org/helm-charts
+      - helm repo add kubernetes-dashboard https://kubernetes.github.io/dashboard
+      - helm repo add mysqloperator https://
+      - helm repo add falcosecurity https://falcosecurity.github.io/charts
       - helm repo update
       - helm repo ls
