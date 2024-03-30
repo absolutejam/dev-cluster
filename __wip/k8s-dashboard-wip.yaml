@@ -1,0 +1,10 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: kubernetes-dashboard-http
+  namespace: obs-kubernetes-dashboard
+spec:
+  host: kubernetes-dashboard-kong-proxy.obs-kubernetes-dashboard.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: DISABLE

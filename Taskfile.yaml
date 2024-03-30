@@ -1,18 +1,35 @@
 version: "3"
 
+dotenv:
+  - "./.env"
+
 env:
   CDK8S_CHECK_UPGRADE: false
+
+vars:
   K3D_CLUSTER: lab
-  # KUBECONFIG: ./secrets/kubeconfig.yaml
+
+  GITEA_HOST: gitea.dev-cluster.local
+  GITEA_USER: gitea-admin
+  GITEA_PASSWORD: admin123!
+
+  NPM_ALIAS: "@crashloopbackoff.dev"
+  REGISTRY: k3d-registry.localhost:5000
+
+  KV_KEY_NPM_TOKEN: "npm-token@dev-cluster"
+  KV_KEY_NPMRC: ".npmrc@dev-cluster"
+  KV_KEY_KUBECONFIG: "kubeconfig@dev-cluster"
+  KV_KEY_PKI_CERT: "cert@dev-cluster"
+  KV_KEY_PKI_KEY: "cert-key@dev-cluster"
 
 includes:
   validation:
-    dir: ./3-validation
-    taskfile: ./3-validation/Taskfile.yaml
+    dir: ./validation
+    taskfile: ./validation/Taskfile.yaml
 
-  services:
-    dir: ./2-services
-    taskfile: ./2-services/Taskfile.yaml
+  service:
+    dir: ./k8s
+    taskfile: ./Taskfile.services.yaml
 
   docs:
     dir: ./docs
@@ -24,36 +41,67 @@ tasks:
   #-------------------------------------------------------------------------------
 
   up:
-    desc: 🚀 Bootstraps the cluster core
+    desc: 🚀 Spins up the cluster
     cmds:
       - task: deps:check
       - task: dev:gen-ca
       - task: clean
-      - task: services:transpile
+      - task: sync-kv
+
       - task: cluster:up
       - task: dev:build-woodpecker-image
 
-      # Core
-      - task: services:deploy:core
+      # Bootstrap
+      - task: service:deploy:core
       - task: validation:pki
 
-      # Gitea
-      - task: services:deploy:gitea
-
       # Woodpecker
-      - task: services:deploy:woodpecker
       - task: dev:gen-woodpecker-oauth-client
+      - task: service:deploy
+        vars:
+          SERVICE: woodpecker
+          NAMESPACE: ext-woodpecker
+
+      - task: service:wait-for
+        vars:
+          KIND: pod
+          SELECTORS: app.kubernetes.io/instance=woodpecker,app.kubernetes.io/name=server
+          NAMESPACE: ext-woodpecker
 
   down:
+    desc: Tear down the cluster
     cmds:
-      - k3d cluster rm --config 1-cluster/k3d.yaml
+      - k3d cluster rm --config cluster/k3d.yaml
 
   clean:
-    desc: Clean any temporary files
+    desc: Clean any temporary files & secrets
+    silent: true
     cmds:
-      # TODO: Use `git clean`?
-      - rm secrets/kubeconfig.yaml || true
-      - rm secrets/woodpecker-oauth2-client.json || true
+      - |
+        for key in $(skate list @dev-cluster --keys-only); do 
+          skate delete ${key}@dev-cluster
+        done
+
+  sync-kv:
+    desc: Syncs config to KV
+    silent: true
+    cmds:
+      - |
+        skate set {{ .KV_KEY_PKI_CERT }} <<<"./pki/ca.pem"
+        skate set {{ .KV_KEY_PKI_KEY }} <<<"./pki/ca-key.pem"
+
+  #-------------------------------------------------------------------------------
+  # Bootstrap
+  #-------------------------------------------------------------------------------
+
+  bootstrap:
+    desc: Bootstrap cluster core
+    cmds:
+      - task: service:wait-for
+        vars:
+          kind: pod
+          selectors: app=gitea
+          namespace: ext-gitea
 
   #-------------------------------------------------------------------------------
   # Cluster
@@ -63,21 +111,19 @@ tasks:
     desc: Spin up the K3d cluster
     env:
       KUBECONFIG: "" # to get Kubeconfig merged
-    dir: ./1-cluster
+    dir: ./cluster
     cmds:
       - silent: true
         cmd: |
           cluster_output=$(k3d cluster ls --no-headers | grep "{{ .K3D_CLUSTER }}" || true)
 
           if [ -n "${cluster_output}" ]; then
-            cat <<EOF
-          Cluster already exists.
+            gum log -l info -t kitchen \
+              "Cluster already exists"
 
-          Run the following to remove it:
-
-              k3d cluster rm {{ .K3D_CLUSTER }}
-
-          EOF
+            gum log -l info -t kitchen -s \
+              "Run the following to remove it" \
+              "command" "k3d cluster rm {{ .K3D_CLUSTER }}"
           else
             if [ {{ .USE_CALICO | default "false" }} == "true" ]; then 
               extra_args="--volume \"$(pwd)/manifests:/var/lib/rancher/k3s/server/manifests/calico.yaml@server:*\""
@@ -87,7 +133,12 @@ tasks:
             k3d cluster create --config k3d.yaml ${extra_args}
           fi
 
-          k3d kubeconfig get lab > ../secrets/kubeconfig.yaml
+          gum log -l debug -t kitchen -s \
+            "Exporting kubeconfig" \
+            "key" "{{ .KV_KEY_KUBECONFIG }}"
+          skate set "{{ .KV_KEY_KUBECONFIG }}" <<<$(k3d kubeconfig get lab)
+
+          gum log -l info -t kitchen "Waiting for cluster to be ready"
 
           kubectl wait pod \
             --namespace kube-system \
@@ -96,34 +147,34 @@ tasks:
             --timeout=300s
 
   #-------------------------------------------------------------------------------
+  # Repos
+  #-------------------------------------------------------------------------------
+
+  git:setup:
+    desc: Setup git repos (etc.)
+    dir: git
+    env:
+      # Terraform provider-specific env vars
+      GITEA_BASE_URL: "https://{{ .GITEA_HOST }}"
+      GITEA_USERNAME: "{{ .GITEA_USER }}"
+      GITEA_PASSWORD: "{{ .GITEA_PASSWORD }}"
+    cmds:
+      - terraform plan
+      - terraform apply
+
+  #-------------------------------------------------------------------------------
   # Dependencies
   #-------------------------------------------------------------------------------
 
   deps:check:
     desc: Checks all required tools are installed
-    cmds:
+    silent: true
+    preconditions:
       - which k3d > /dev/null
       - which kubectl > /dev/null
-
-  deps:install:
-    desc: Install required binaries & tools
-    cmds:
-      - task: deps:install:k3d
-      - task: deps:install:cdk8s
-      - task: deps:install:kubeseal
-      - task: deps:install:istioctl
-
-  deps:install:kubeseal:
-    cmd: if ! which kubeseal; then brew install kubeseal; fi
-
-  deps:install:istioctl:
-    cmd: if ! which istioctl; then brew install istiocl; fi
-
-  deps:install:k3d:
-    cmd: if ! which k3d; then brew install k3d; fi
-
-  deps:install:cdk8s:
-    cmd: if ! which cdk8s; then pnpm install -g cdk8s-cli; fi
+      - which gum > /dev/null
+    cmd: |
+      gum log -l info -t kitchen -s "All required binaries are available ✅"
 
   #-------------------------------------------------------------------------------
   # Dev tasks
@@ -133,22 +184,24 @@ tasks:
     desc: Generate an access token for (p)npm
     env:
       SCOPES: '["write:organization"]'
-    cmds:
-      - ./bin/gitea_generate_npm_token.sh
+    cmd: ./bin/gitea_generate_npm_token.sh
 
   dev:create-npm-config:
     desc: Create the NPM config for publishing & pulling packages
-    env:
-      USER: gitea-admin
-      PERSONAL_ACCESS_TOKEN: TODO
-      GITEA_API: dev-cluster.local/gitea/api/
-      REGISTRY_SCOPE: "@devcluster:registry"
-      SCOPES: '["write:organization"]'
-    dir: 2-services
+    dir: services
     cmds:
-      - |
-        pnpm config set ${SCOPE} https://${GITEA_API}/packages/${USER}/npm/
-        pnpm config set -- '//${GITEA_API}/packages/${USER}/npm/:_authToken' "${PERSONAL_ACCESS_TOKEN}"
+      - cmd: |
+          gum log -l info -t kitchen -s "Generating .npmrc" "key" "{{ .KV_KEY_NPM_TOKEN }}"
+          PAT=$(skate get "{{ .KV_KEY_NPM_TOKEN }}" | jq -r '.sha1')
+
+          cat <<EOF | skate set "{{ .KV_KEY_NPMRC }}".npmrc@dev-cluster
+          pnpm config set {{ .NPM_ALIAS }} https://{{ .GITEA_HOST }}/api/packages/{{ .GITEA_USER }}/npm/
+          pnpm config set -- '//{{ .GITEA_HOST }}/api/packages/{{ .USER }}/npm/:_authToken' "${PAT}"
+          pnpm config set -- '//{{ .GITEA_HOST }}/api/packages//npm/:_authToken' "${PAT}"
+          EOF
+
+          skate get .npmrc@dev-cluster > .npmrc
+        silent: true
 
   dev:gen-woodpecker-oauth-client:
     desc: Generates a Gitea client for Woodpecker to use
@@ -161,17 +214,17 @@ tasks:
     cmd: ./bin/gitea_create_repo.sh
 
   dev:gen-ca:
-    desc: Generate a CA cert, if one does not already exist
     dir: pki
+    desc: Generate a CA cert, if one does not already exist
     cmds:
       - silent: true
         cmd: |
           if [ -f "ca.pem" ]; then
-            echo "CA cert already exists"
-            exit 0
+            gum log -l info -t kitchen "CA cert already exists"
+          else
+            gum log -l info -t kitchen "Generating CA cert - Don't forget to trust it!"
+            cfssl gencert -initca ca-csr.json | cfssljson -bare ca -
           fi
-
-          cfssl gencert -initca ca-csr.json | cfssljson -bare ca -
 
   dev:trust-ca:
     desc: Trusts the generated CA cert
@@ -190,10 +243,22 @@ tasks:
     desc: Build woodpecker plugin-git image
     vars:
       IMAGE_NAME: woodpecker/plugin-git
-      REGISTRY: k3d-registry.localhost:5000
+    sources:
+      - ./pki/ca.pem
+      - ./others/woodpecker/plugin-git/Dockerfile
     cmds:
-      - cp pki/ca.pem 99-others/woodpecker/plugin-git
-      - docker build -t {{ .REGISTRY }}/{{ .IMAGE_NAME }} 99-others/woodpecker/plugin-git
+      - cmd: |
+          gum log -l info -t kitchen -s \
+            "Building custom woodpecker plugin-git image" \
+            "image" "{{ .REGISTRY }}/{{ .IMAGE_NAME }}"
+        silent: true
+      - |
+        cert=$(skate get {{ .KV_KEY_PKI_CERT }})
+
+        docker build \
+          --build-arg="cert=${cert}" \
+          -t {{ .REGISTRY }}/{{ .IMAGE_NAME }} \
+          other/woodpecker/plugin-git
       - docker push {{ .REGISTRY }}/{{ .IMAGE_NAME }}
 
   dev:tools:

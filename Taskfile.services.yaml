@@ -1,0 +1,264 @@
+version: "3"
+
+vars:
+  IMPORTS: ./packages/shared/src/imports
+
+tasks:
+  #-----------------------------------------------------------------------------
+  # Utils
+  #-----------------------------------------------------------------------------
+
+  run-watcher:
+    desc: Watches cdk8s definitions and transpiles
+    cmd: pnpm tsc --build -w
+
+  packages:
+    desc: Sync pnpm packages
+    cmd: pnpm i
+
+  sync-configs:
+    desc: Syncs template files to each service
+    cmd: |
+      for service in ./services/*; do
+        cp __template/* "${service}/"
+        ls "${service}"
+      done
+
+  clean:
+    internal: true
+    cmd: rm dist/*.yaml &>/dev/null
+
+  #-----------------------------------------------------------------------------
+  # cdk8s
+  #-----------------------------------------------------------------------------
+  cdk8s:import:
+    desc: cdk8s import
+    cmd: "cdk8s import -o {{ .IMPORTS }} {{ .CLI_ARGS }}"
+
+  cdk8s:export-crds:
+    desc: Export all CRDs from the cluster
+    shopt:
+      - globstar
+    vars:
+      CRD_DIR: __crds
+    cmds:
+      - cmd: mkdir -p {{ .CRD_DIR }}
+        silent: true
+
+      # NOTE: Stops looping after first `kubectl` if not explicitly run via. bash
+      - cmd: |
+          bash -c '
+            crds=$(kubectl get crd -o custom-columns="NAME:.metadata.name" --no-headers)
+            while read -r crd; do
+              echo "Exporting ${crd}"
+              kubectl get crd "${crd}" -o yaml > "{{ .CRD_DIR }}/${crd}.yaml"
+            done <<< "${crds}"
+          '
+        silent: true
+
+  cdk8s:import-crds:
+    desc: Import all CRDs into cdk8s
+    vars:
+      CRD_DIR: __crds
+    cmds:
+      - task: cdk8s:import-crds:sealed-secrets
+      - task: cdk8s:import-crds:cert-manager
+      - task: cdk8s:import-crds:trust-manager
+      - task: cdk8s:import-crds:istio
+
+  cdk8s:import-crds:istio:apply-fixes:
+    desc: Fixes duplicate definitions
+    cmds:
+      - silent: true
+        cmd: |
+          bash -c '
+            file="{{ .IMPORTS }}/istio/security-requestauthentications-security.istio.io.ts"
+            echo "Fixing ${file}"
+
+            lines=('189' '573')
+            for line in "${lines[@]}"; do
+                echo "Updating line ${line}"
+                gsed -i "${line}s#readonly jwksUri#readonly jwks_uri#" "${file}"
+            done
+          '
+
+      - silent: true
+        cmd: |
+          bash -c '
+            file="{{ .IMPORTS }}/istio/networking-virtualservices-networking.istio.io.ts"
+            echo "Fixing ${file}"
+
+            lines=('221' '2538')
+            for line in "${lines[@]}"; do
+                echo "Updating line ${line}"
+                gsed -i "${line}s#readonly mirrorPercent#readonly mirror_percent#" "${file}"
+              done
+          '
+
+  #-----------------------------------------------------------------------------
+  # Core
+  #-----------------------------------------------------------------------------
+  bootstrap:
+    desc: Bootstrap cluster with core resources
+    cmds:
+      - task: build
+        vars:
+          SERVICE: "bootstrap"
+
+      - task: deploy
+        vars:
+          SERVICE: "secrets"
+          BUILD: false
+
+      - cmd: gum log -l info -t kitchen -s "Installing secrets components"
+        silent: true
+
+      - |
+        kubectl apply -f core/dist/core-sealed-secrets.k8s.yaml
+        kubectl apply -f core/dist/core-reflector.k8s.yaml
+
+      - cmd: gum log -l info -t kitchen -s "Installing PKI components"
+        silent: true
+
+      - |
+        kubectl apply -f core/dist/core-cert-manager.k8s.yaml
+        kubectl wait pod \
+          --namespace core-cert-manager \
+          -l app.kubernetes.io/component=webhook \
+          --for=condition=ready \
+          --timeout=120s
+
+        kubectl apply -f core/dist/core-trust-manager.k8s.yaml
+        kubectl wait pod \
+          --namespace core-trust-manager \
+          -l app=trust-manager \
+          --for=condition=ready \
+          --timeout=120s
+
+        kubectl apply -f core/dist/core-cluster-certs.k8s.yaml
+
+      - cmd: gum log -l info -t kitchen -s "Installing Istio mesh components"
+        silent: true
+
+      - |
+        kubectl apply -f core/dist/core-istio.k8s.yaml
+        kubectl wait pod \
+          --namespace core-istio \
+          -l app=istiod \
+          --for=condition=ready \
+          --timeout=300s
+
+      - cmd: gum log -l info -t kitchen -s "Installing Istio gateway components"
+        silent: true
+
+      - |
+        kubectl apply -f core/dist/core-istio-gateway.k8s.yaml
+        kubectl wait pod \
+          --namespace core-istio \
+          -l app=istio-gateway \
+          --for=condition=ready \
+          --timeout=300s
+
+  #-----------------------------------------------------------------------------
+  # Internal
+  #-----------------------------------------------------------------------------
+
+  build:
+    desc: Builds manifests for the provided SERVICE
+    cmd: |
+      if [ -z "{{ .SERVICE }}" ]; then
+        export SERVICE=$(gum filter -- <<<$(ls services))
+        [ -z "${SERVICE}" ] && exit 1
+        task build SERVICE="${SERVICE}"
+
+        exit 0
+      fi
+
+      cd "services/{{ .SERVICE }}"
+      gum log -l info -t kitchen -s "Building" \
+        "service" "{{ .SERVICE }}"
+
+      rm dist/*.k8s.yaml &>/dev/null || true
+      time bun run src/main.ts
+
+      gum log -l info -t kitchen -s "Rendered manifests" \
+        "dist" "services/{{ .SERVICE }}/dist"
+      ls dist
+
+    silent: true
+    sources:
+      - src/**/*.ts
+    generates:
+      - src/**/*.js
+
+  deploy:
+    desc: Deploy manifests for the provided SERVICE
+    cmd: |
+      if [ -z "{{ .SERVICE }}" ]; then
+        export SERVICE=$(gum filter -- <<<$(ls services))
+
+        if [ "{{ .BUILD }}" != "false" ]; then
+          task build SERVICE="${SERVICE}"
+        fi
+        task deploy SERVICE="${SERVICE}"
+
+        exit 0
+      fi
+
+      gum log -l info -t kitchen -s "Deploying" \
+        "service" "{{ .SERVICE }}"
+
+      kubectl apply -f services/{{ .SERVICE }}/dist/
+    silent: true
+
+  push:
+    desc: Push a service
+    silent: true
+    interactive: true
+    cmd: |
+      if [ -z "{{ .SERVICE }}" ]; then
+        export SERVICE=$(gum filter -- <<<$(ls services))
+        task push:service SERVICE="${SERVICE}"
+
+        exit 0
+      fi
+
+      gum log -l debug -t kitchen -s "Copying template files" \
+        "service" "{{ .SERVICE }}"
+
+      rm ./services/{{ .SERVICE }}/config.yaml
+      cp ../config.yaml ./services/{{ .SERVICE }}/
+      cp -r ./__template/. ./services/{{ .SERVICE }}/
+
+      gum log -l info -t kitchen -s \
+        "Updating subtree" \
+        "service" "{{ .SERVICE }}" \
+        "branch" "service/{{ .SERVICE }}" \
+
+      cd $(git rev-parse --show-toplevel)
+
+      git subtree split \
+        --prefix 2-services/services/{{ .SERVICE }} \
+        -b 'service/{{ .SERVICE }}'
+
+      git remote remove 'gitea' || true
+      git remote add gitea 'https://gitea.dev-cluster.local/services/{{ .SERVICE }}.git'
+      git push -u gitea service/{{ .SERVICE }}:main
+
+  wait-for:
+    desc: Wait for the service to be ready
+    requires:
+      vars: [NAMESPACE, KIND, SELECTORS]
+    cmds:
+      - cmd: |
+          gum log -l info -t kitchen -s "Waiting for {{ .KIND }} \
+            "namespace" "{{ .NAMESPACE }}" \
+            "selectors" "{{ .SELECTORS }}" \
+        silent: true
+
+      - |
+        kubectl wait {{ .KIND }} \
+          --namespace {{ .NAMESPACE }} \
+          -l {{ .SELECTORS }} \
+          --for=condition=ready \
+          --timeout=300s

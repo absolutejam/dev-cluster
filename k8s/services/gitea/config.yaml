@@ -4,9 +4,6 @@ vars:
   observability: obs
   domain: dev-cluster.local
 
-vault:
-  namespace: core-vault
-
 pki:
   rootCaName: root-ca
   rootCertName: root-cert
@@ -27,7 +24,6 @@ gitea:
   # NOTE: min of 8 characters
   password: "admin123!"
   email: admin@dev-cluster.local
-  servicesOrg: services
 
 woodpecker:
   namespace: ext-woodpecker

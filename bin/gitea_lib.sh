@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
 
-root=$(git rev-parse --show-toplevel)
+[ -z "${GITEA_HOST}" ] && echo "GITEA_HOST is required"
+[ -z "${GITEA_USERNAME}" ] && echo "GITEA_USERNAME is required"
+[ -z "${GITEA_PASSWORD}" ] && echo "GITEA_PASSWORD is required"
 
-config=$(cat ${root}/config.yaml)
-username=$(yq '.gitea.username' <<<"${config}")
-password=$(yq '.gitea.password' <<<"${config}")
-domain=$(yq '.vars.domain' <<<"${config}")
-
-[ -z "${username}" ] && echo "username is required" && exit 1
-[ -z "${password}" ] && echo "password is required" && exit 1
-[ -z "${domain}" ] && echo "domain is required" && exit 1
-
-gitea_api=https://gitea.${domain}/api/v1
+gitea_api="${GITEA_HOST}/api/v1"
 curl_opts="-s"
 
 #-------------------------------------------------------------------------------
